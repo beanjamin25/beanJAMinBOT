@@ -11,8 +11,8 @@ from pprint import pprint
 from twitch_rest_api import TwitchRestApi
 from streamlabs_api import StreamlabsApi
 
-twitch_api = TwitchRestApi(auth_filename="botjamin_auth.yaml")
-streamlabs = StreamlabsApi(auth_filename="botjamin_auth.yaml")
+twitch_api = TwitchRestApi(auth_filename="config/botjamin_auth.yaml")
+streamlabs = StreamlabsApi(auth_filename="config/botjamin_auth.yaml")
 
 context = zmq.Context()
 

@@ -247,7 +247,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
 if __name__ == '__main__':
     print("Starting Bot...")
-    properties = yaml.safe_load(open("bot.conf"))
+    properties = yaml.safe_load(open("config/bot.conf"))
     print(properties)
     bot = TwitchBot(properties)
 

@@ -266,6 +266,6 @@ class TwitchRestApi:
 
 
 if __name__ == "__main__":
-    twitch_api = TwitchRestApi(auth_filename="botjamin_auth.yaml")
+    twitch_api = TwitchRestApi(auth_filename="config/botjamin_auth.yaml")
     res = twitch_api.eventsub_add_subscription("beanjamin25", "channel.subscription.gift")
     print(res)
