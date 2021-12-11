@@ -1,0 +1,4 @@
+COMMAND	MESSAGE
+fc	<friend_code>
+lurk	thanks for the lurk! see ya later Squid4
+discord	<discord_invite_link>

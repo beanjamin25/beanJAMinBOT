@@ -23,6 +23,7 @@ from twitch_events import TwitchEvents
 CHANNEL_NAME = "channel_name"
 BOT_NAME = "bot_name"
 
+
 class TwitchBot(irc.bot.SingleServerIRCBot):
 
     watchtime = None
@@ -49,14 +50,16 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.twitch_api.validate_oauth_token()
         server = "irc.chat.twitch.tv"
         port = 6667
-        irc.bot.SingleServerIRCBot.__init__(self, [(server, port, "oauth:"+self.twitch_api.oauth_token)], self.channel_name, self.bot_name)
-
-        custom_commands_file = properties.get('custom_command_file', None)
-        if os.path.exists(custom_commands_file):
-            self.init_custom_commands(custom_commands_file)
+        irc.bot.SingleServerIRCBot.__init__(self, [(server, port, "oauth:"+self.twitch_api.oauth_token)],
+                                            self.channel_name, self.bot_name)
 
         current_dir = os.getcwd()
         data_directory = os.path.join(current_dir, properties.get('data_directory', 'data'))
+
+        custom_commands_file = properties.get('custom_command_file', None)
+        custom_commands_path = os.path.join(data_directory, custom_commands_file)
+        if os.path.exists(custom_commands_path):
+            self.init_custom_commands(custom_commands_path)
 
         watchtime_config = properties.get('watchtime', dict())
         if watchtime_config.get("enabled", False):
@@ -84,7 +87,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         if pokegame_config.get("enabled", False):
             pokeDB = pokegame_config.get("pokeDB", None)
             user_pokedex = pokegame_config.get("user_pokedex", None)
-            sfx_url_base = pokegame_config.get("sfx_url_base", "")
+            alert_sound_url = pokegame_config.get("alert_sound_url", "")
             if pokeDB is not None and user_pokedex is not None:
                 poke_dir = os.path.join(data_directory, "pokemon")
                 pokeDB = os.path.join(poke_dir, pokeDB)
@@ -92,21 +95,19 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 self.poke_game = PokemonChatGame(self.channel,
                                                  self.connection,
                                                  pokeDB, user_pokedex,
+                                                 alert_sound_url,
                                                  self.auth_filename,
-                                                 sfx_url_base)
+                                                 streamlabs_alerts=pokegame_config.get('streamlabs_alerts', False))
 
         sfx_mappings = properties.get("sfx_mappings")
-        sfx_directory = None
         if sfx_mappings is not None:
-            sfx_mappings = yaml.safe_load(open(sfx_mappings))
+            sfx_mappings = yaml.safe_load(open(os.path.join(data_directory, sfx_mappings)))
             sfx_directory = os.path.join(data_directory, "sfx")
-        self.twitch_eventsub = TwitchEvents(channel=self.channel,
-                                            connection=self.connection,
-                                            sfx_directory=sfx_directory,
-                                            sfx_mappings=sfx_mappings)
-        self.twitch_eventsub.start()
-
-
+            self.twitch_eventsub = TwitchEvents(channel=self.channel,
+                                                connection=self.connection,
+                                                sfx_directory=sfx_directory,
+                                                sfx_mappings=sfx_mappings)
+            self.twitch_eventsub.start()
 
     def on_welcome(self, c, e):
         print("Welcome!")
@@ -132,15 +133,18 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         cmd_args = parsed_cmd[1:]
         self.do_command(e, user, cmd, cmd_args)
 
-    def get_username(self, msg):
+    @staticmethod
+    def get_username(msg):
         user = [d['value'] for d in msg.tags if d['key'] == 'display-name'][0]
         return user.lower()
 
-    def is_mod(self, event):
+    @staticmethod
+    def is_mod(event):
         is_mod = [d['value'] for d in event.tags if d['key'] == 'mod'][0]
         return is_mod == '1'
 
-    def is_bits(self, event):
+    @staticmethod
+    def is_bits(event):
         for d in event.tags:
             if d['key'] == "bits":
                 return True
@@ -180,10 +184,8 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         elif cmd == 'watchtime' and self.watchtime is not None:
             if len(args) == 0:
                 watchtime = self.watchtime.get_user_watchtime(user)
-                watch_user = user
             elif user_has_mod:
                 watchtime = self.watchtime.get_user_watchtime(args[0])
-                watch_user = args[0]
             else:
                 return
             hours = int(watchtime / 3600)
@@ -219,15 +221,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 if queue is None or q == queue:
                     c.privmsg(self.channel, self.schedule.get_maps(q))
 
-
-
-
-
         elif cmd in ['points', 'gamble', 'borrow', 'payback'] and self.gamble is not None:
             self.gamble.do_command(cmd, user, args)
 
         elif cmd in ['catch', 'pokedex'] and self.poke_game is not None:
-            self.poke_game.do_command(cmd, user, args)
+            self.poke_game.do_command(cmd, user)
 
     def init_custom_commands(self, custom_commands_filename):
         with open(custom_commands_filename, 'r') as custom_commands_file:

@@ -4,9 +4,16 @@ import pyttsx3
 import queue
 from threading import Thread
 
+# using pyttsx3 for voices
+# more info at: https://github.com/nateshmbhat/pyttsx3
+
+
 class TalkBot:
 
-    def __init__(self, config={}):
+    def __init__(self, config=None):
+        if config is None:
+            config = {}
+
         self.engine = pyttsx3.init()
         self.engine.setProperty('voice', config.get('voice', 'english_rp+f3'))
         self.engine.setProperty('rate', config.get('rate', 150))

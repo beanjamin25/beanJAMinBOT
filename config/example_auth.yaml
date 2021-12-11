@@ -1,0 +1,28 @@
+streamlabs:
+  access_token: <access_token>
+  client_id: <client_id>
+  client_secret: <client_secret>
+  redirect_uri: <redirect_url>
+  scopes:
+  - alerts.write
+  - alerts.create
+twitch:
+  # if you use https://twitchapps.com/tmi/ put the token in both app and ouath, set refresh to false
+  app_token: <app_token>
+  oauth_token: <oauth_token>
+  refresh_token: <refresh_token_generated_in_auth_flow> # False if using twitchapps oauth gen
+  client_id: <client_id>
+  client_secret: <client_secret>
+  eventsub_callback_uri: <twitch_api_eventsub_callback_uri>
+  oauth_redirect_uri: <twitch_api_oauth_callback_uri> # specify this in twitch dev app settings
+  scopes:
+  - user:read:email
+  - chat:edit
+  - chat:read
+  - whispers:read
+  - whispers:edit
+  - channel:moderate
+  - channel_editor
+  - channel:read:redemptions
+  - channel:manage:redemptions
+  - channel:read:subscriptions

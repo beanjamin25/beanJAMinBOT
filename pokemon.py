@@ -17,16 +17,16 @@ COOLDOWN = 1
 class NoMorePokeballsException(Exception):
     pass
 
+
 class CooldownException(Exception):
     pass
 
 
 class PokemonChatGame:
 
-    def __init__(self, channel, connection, pokedb, pokedex, auth_filename, sfx_url_base):
+    def __init__(self, channel, connection, pokedb, pokedex, sfx_url_base, auth_filename, streamlabs_alerts=False):
         self.channel = channel
         self.connection = connection
-
 
         self.user_pokedex = Pokedex(pokedex)
         self.pokeDB = PokeDB(pokedb)
@@ -36,11 +36,13 @@ class PokemonChatGame:
 
         self.shiny_odds = 4096
 
-        self.streamlabs = StreamlabsApi(auth_filename, sfx_url_base)
+        self.streamlabs = None
+        if streamlabs_alerts:
+            self.streamlabs = StreamlabsApi(auth_filename, sfx_url_base)
 
         self.cooldown_dict = defaultdict(float)
 
-    def do_command(self, cmd, user, args):
+    def do_command(self, cmd, user):
         c = self.connection
 
         if cmd == "catch":
@@ -65,7 +67,6 @@ class PokemonChatGame:
         elif cmd == "pokedex":
             c.privmsg(self.channel, self.pokedex_statement(user))
 
-
     def catch(self, user):
 
         if time.time() - self.cooldown_dict[user] < COOLDOWN:
@@ -87,7 +88,8 @@ class PokemonChatGame:
             if is_shiny:
                 alert_message += " and it was a *shiny*"
             alert_message += "!"
-            self.streamlabs.poke_alert(alert_message, poke_id=int(pokemon.get("id")))
+            if self.streamlabs is not None:
+                self.streamlabs.poke_alert(alert_message, poke_id=int(pokemon.get("id")))
 
         return pokemon, first_caught, is_shiny, is_shiny_first
 
@@ -105,7 +107,6 @@ class PokemonChatGame:
             msg += f" and you have caught {num_shiny} shinies!"
         msg += f" and you have {remaining_pokeballs} pokeballs left!"
         return msg
-
 
 
 class Pokedex:
@@ -141,6 +142,7 @@ class Pokedex:
     def get_user_pokedex(self, user):
         return self.pokedex_by_user.get(user, {CAUGHT: set(), SHINY: set()})
 
+
 class PokeDB:
 
     def __init__(self, pokedb_filename):
@@ -153,9 +155,8 @@ class PokeDB:
                 self.name_index[pokemon.get('name')] = int(pokemon.get('id'))
                 self.gen_index[int(pokemon.get('generation_id'))].append(int(pokemon.get('id')))
 
-
-    def get_pokemon(self, id):
-        return self.pokedex[id]
+    def get_pokemon(self, poke_id):
+        return self.pokedex[poke_id]
 
     def catch(self, gen_id=None):
         catchable = list(self.pokedex.keys())
@@ -165,27 +166,27 @@ class PokeDB:
         return self.pokedex.get(random.choice(catchable))
 
 
-if __name__ == "__main__":
-    poke_game = PokemonChatGame("data/pokemon/pokeDB.csv", "data/pokemon/pokedex.yaml", "botjamin_auth.yaml")
-    counter = 0
-    while True:
-        try:
-            pokemon, first_caught, is_shiny, is_shiny_first = poke_game.catch("beanjamin25")
-            p_name = pokemon.get(NAME).title()
-            msg = f"beanjamin25, you caught a {p_name}!"
-            if is_shiny:
-                msg += " and it was a shiny!"
-
-            print(msg + " " + poke_game.pokedex_statement("beanjamin25"))
-            time.sleep(2)
-
-        except NoMorePokeballsException as e:
-            print(e)
-            break
-        except CooldownException as e:
-            print(e)
-            time.sleep(2)
-
-        counter += 1
-
-    print(counter)
+# if __name__ == "__main__":
+#     poke_game = PokemonChatGame("data/pokemon/pokeDB.csv", "data/pokemon/pokedex.yaml", "botjamin_auth.yaml")
+#     counter = 0
+#     while True:
+#         try:
+#             pokemon, first_caught, is_shiny, is_shiny_first = poke_game.catch("beanjamin25")
+#             p_name = pokemon.get(NAME).title()
+#             msg = f"beanjamin25, you caught a {p_name}!"
+#             if is_shiny:
+#                 msg += " and it was a shiny!"
+#
+#             print(msg + " " + poke_game.pokedex_statement("beanjamin25"))
+#             time.sleep(2)
+#
+#         except NoMorePokeballsException as e:
+#             print(e)
+#             break
+#         except CooldownException as e:
+#             print(e)
+#             time.sleep(2)
+#
+#         counter += 1
+#
+#     print(counter)
