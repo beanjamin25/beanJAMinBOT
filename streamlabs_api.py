@@ -20,7 +20,7 @@ SCOPES = "scopes"
 
 class StreamlabsApi:
 
-    def __init__(self, auth_filename=None, sfx_url_base=None):
+    def __init__(self, auth_filename=None, alert_sound_url=None):
         self.auth_filename = auth_filename
         self.props = yaml.safe_load(open(self.auth_filename)).get(STREAMLABS)
         self.client_id = self.props[CLIENT_ID]
@@ -40,7 +40,7 @@ class StreamlabsApi:
             "scope": self.scopes
         }
 
-        self.sfx_url_base = sfx_url_base
+        self.alert_sound_url = alert_sound_url
 
     def get_auth_url(self):
         uri, state = self.client.create_authorization_url(AUTH_URL)
@@ -64,7 +64,7 @@ class StreamlabsApi:
             "special_text_color": "orange",
             "duration": 5000,
             "user_message": " ",
-            "sound_href": self.sfx_url_base + "pokesound.ogg",
+            "sound_href": self.alert_sound_url,
             "image_href": f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/{poke_id}.png"
         }
         resp = self.client.post(url, params=params)
