@@ -142,6 +142,14 @@ class TwitchRestApi:
             return True
         return False
 
+    def get_app_token(self):
+        self.validate_app_token()
+        return self.app_token
+
+    def get_oauth_token(self):
+        self.validate_oauth_token()
+        return self.oauth_token
+
     def get_channel_id(self, channel_name):
         self.validate_app_token()
         url = API_BASE + "users?login=" + channel_name
@@ -211,7 +219,7 @@ class TwitchRestApi:
                 r = requests.delete(del_url, headers=headers, params={"id": sub_id})
                 print(r.status_code, r.content)
 
-    def eventsub_delete_subscription(self, channel_name, subscription_type):
+    def eventsub_delete_subscription(self, subscription_id):
         self.validate_app_token()
         url = API_BASE + "eventsub/subscriptions"
         headers = {
@@ -219,23 +227,8 @@ class TwitchRestApi:
             "Client-Id": self.client_id
         }
 
-        subscriptions = self.get_eventsub_subscriptions()
-        pprint(subscriptions)
-        channel_id = self.get_channel_id(channel_name)
-        sub_to_delete = None
-        for sub in subscriptions.get('data', {}):
-            if sub['type'] == subscription_type:
-                condition = sub['condition']
-                if condition['broadcaster_user_id'] == channel_id:
-                    sub_to_delete = sub['id']
-                elif condition['to_broadcaster_user_id'] == channel_id:
-                    sub_to_delete = sub['id']
-                elif condition['from_broadcaster_user_id'] == channel_id:
-                    sub_to_delete = sub['id']
-            if sub_to_delete is not None:
-                r = requests.delete(url, headers=headers, params={'id': sub_to_delete})
-                print(r.status_code, r.content)
-                return
+        r = requests.delete(url, headers=headers, params={'id': subscription_id})
+        return
 
     def eventsub_add_subscription(self, channel_name, subscription_type):
         self.validate_app_token()

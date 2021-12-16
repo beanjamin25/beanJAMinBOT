@@ -1,8 +1,10 @@
-import zmq
-import threading
+import logging
 import os
 
 from playsound import playsound
+
+from twitch_eventsub import TwitchEventsub
+from twitch_rest_api import TwitchRestApi
 
 URL = "127.0.0.1"
 PORT = "5555"
@@ -13,50 +15,48 @@ POINTS = "channel.channel_points_custom_reward_redemption.add"
 
 sfx_dir = "data/sfx"
 
-class TwitchEvents(threading.Thread):
+class TwitchEvents:
 
-    def __init__(self, channel=None, connection=None, sfx_directory="data/sfx", sfx_mappings={}):
-        threading.Thread.__init__(self)
-        self.daemon = True
-
+    def __init__(self, channel=None, connection=None, twitch_api: TwitchRestApi=None,
+                 sfx_directory="data/sfx", sfx_mappings={}):
         self.channel = channel
         self.connection = connection
         self.sfx_directory = sfx_directory
         self.sfx_mappings = sfx_mappings
 
-        self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.REP)
-        # We can connect to several endpoints if we desire, and receive from all.
-        self.socket.bind(f'tcp://{URL}:{PORT}')
+        self.eventsub = TwitchEventsub(port=8008,
+                                       twitch=twitch_api,
+                                       log_level=logging.DEBUG)
 
+        user_id = twitch_api.get_channel_id(channel.strip("#"))
+        self.eventsub.start()
+        self.eventsub.unsubscribe_all()
+        self.eventsub.listen_channel_follow(user_id, self.on_follow)
+        self.eventsub.listen_channel_raid(user_id, self.on_raid)
+        self.eventsub.listen_channel_points_redeem(user_id, self.on_points)
+        # self.context = zmq.Context()
+        # self.socket = self.context.socket(zmq.REP)
+        # # We can connect to several endpoints if we desire, and receive from all.
+        # self.socket.bind(f'tcp://{URL}:{PORT}')
 
-    def run(self) -> None:
-        c = self.connection
-        while True:
-            message = self.socket.recv_json()
-            self.socket.send_json({"response": "ok"})
-            print(message)
-            event_type = message.get("subscription", {}).get("type")
-            event = message['event']
-            if event_type == FOLLOW:
-                new_follower = event['user_name']
-                new_follow_msg = f"Thank you for following {new_follower}, welcome to the Bean Squad!"
-                c.privmsg(self.channel, new_follow_msg)
+    async def on_follow(self, data):
+        event = data.get("event", {})
+        new_follower = event['user_name']
+        new_follow_msg = f"Thank you for following {new_follower}, welcome to the Bean Squad!"
+        self.connection.privmsg(self.channel, new_follow_msg)
 
-            elif event_type == RAID:
-                raider = event['from_broadcaster_user_name']
-                if raider.lower() == self.channel.lower():
-                    continue
-                num_viewers = event['viewers']
-                raided_msg = f"{raider} just raided the channel with {num_viewers} viewers! Welcome raiders the Bean Stream!"
-                c.privmsg(self.channel, raided_msg)
+    async def on_raid(self, data):
+        event = data.get("event", {})
+        raider = event['from_broadcaster_user_name']
+        num_viewers = event['viewers']
+        raided_msg = f"{raider} just raided the channel with {num_viewers} viewers! Welcome raiders the Bean Stream!"
+        self.connection.privmsg(self.channel, raided_msg)
 
-            elif event_type == POINTS and self.sfx_mappings is not None:
-                reward = event['reward']
-                reward_name = reward['title']
-                reward_sfx = self.sfx_mappings.get(reward_name)
-                if reward_sfx:
-                    sfx_path = os.path.join(self.sfx_directory, reward_sfx)
-                    playsound(sfx_path)
-
-
+    async def on_points(self, data):
+        event = data.get("event", {})
+        reward = event['reward']
+        reward_name = reward['title']
+        reward_sfx = self.sfx_mappings.get(reward_name)
+        if reward_sfx:
+            sfx_path = os.path.join(self.sfx_directory, reward_sfx)
+            playsound(sfx_path)

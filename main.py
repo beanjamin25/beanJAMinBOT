@@ -105,9 +105,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             sfx_directory = os.path.join(data_directory, "sfx")
             self.twitch_eventsub = TwitchEvents(channel=self.channel,
                                                 connection=self.connection,
+                                                twitch_api=self.twitch_api,
                                                 sfx_directory=sfx_directory,
                                                 sfx_mappings=sfx_mappings)
-            self.twitch_eventsub.start()
 
     def on_welcome(self, c, e):
         print("Welcome!")
@@ -252,4 +252,5 @@ if __name__ == '__main__':
     try:
         bot.start()
     except KeyboardInterrupt:
+        bot.twitch_eventsub.eventsub.stop()
         print("viewers this stream [%s]" % ", ".join(bot.watchtime.this_stream))

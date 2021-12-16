@@ -7,3 +7,4 @@ pyttsx3==2.90
 PyYAML==6.0
 pyzmq==22.3.0
 requests==2.25.1
+aiohttp~=3.8.1
