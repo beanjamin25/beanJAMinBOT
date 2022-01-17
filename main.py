@@ -12,6 +12,7 @@ import irc.bot
 import requests
 import yaml
 
+from clips import Clips
 from twitch_rest_api import TwitchRestApi
 from gamble import SimpleGamble
 from watchtime import Watchtime
@@ -34,6 +35,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
     schedule = Schedule()
     map_timeout = 300
     map_last_called = 0
+
+    clip_timeout = 30
+    clip_last_called = 0
 
     custom_commands = dict()
     quotes = None
@@ -63,6 +67,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         if os.path.exists(self.custom_commands_path):
             self.custom_commands = yaml.safe_load(open(self.custom_commands_path))
 
+        self.clip_bot = Clips(channel=self.channel,
+                              channel_name=self.channel_name,
+                              twitch_api=self.twitch_api,
+                              connection=self.connection)
+        self.clip_bot.start()
+
         quotes_file = properties.get("quotes_file")
         if quotes_file is not None:
             self.quotes_path = os.path.join(data_directory, quotes_file)
@@ -77,8 +87,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 db = os.path.join(data_directory, db)
             self.watchtime = Watchtime(channel=self.channel_name, interval=interval, db=db)
             self.watchtime.start()
-            self.check_if_live_thread = Thread(target=self.check_if_live_target, args=(5,), daemon=True)
-            self.check_if_live_thread.start()
+
+        self.check_if_live_thread = Thread(target=self.check_if_live_target, args=(5,), daemon=True)
+        self.check_if_live_thread.start()
 
         tts_config = properties.get('tts', dict())
         if tts_config.get("enabled", False):
@@ -168,12 +179,15 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def check_if_live_target(self, interval=5):
         while True:
-            is_live = self.twitch_api.get_stream_info(self.channel_name) is not False
+            stream_info = self.twitch_api.get_stream_info(self.channel_name)
+            is_live = stream_info is not False
             if not self.watchtime.stream_flag and is_live:
                 print(self.channel_name + " has gone LIVE!!! LETS GOOO!!!!!")
+                self.clip_bot.init_clips_for_stream(started_at=stream_info.get("started_at"))
                 self.watchtime.stream_flag = True
             elif self.watchtime.stream_flag and not is_live:
                 print(self.channel_name + " has ended the stream!")
+                self.clip_bot.reset_clips_for_stream()
                 self.watchtime.stream_flag = False
             time.sleep(interval)
 
@@ -192,6 +206,15 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         if cmd in self.custom_commands:
             msg = self.custom_commands[cmd]['text']
             c.privmsg(self.channel, msg)
+
+        elif cmd == "clip":
+            if time.time() - self.clip_last_called < self.clip_timeout:
+                return
+            res = self.twitch_api.create_clip(self.channel_name)
+            if res.status_code < 400:
+                self.clip_last_called = time.time()
+            else:
+                print(res.content)
 
         elif cmd in ('addcommand', 'removecommand') and (user_has_mod or is_vip):
             if cmd == "addcommand":

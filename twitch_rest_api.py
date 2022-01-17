@@ -1,3 +1,4 @@
+import datetime
 import secrets
 from pprint import pprint
 
@@ -12,6 +13,8 @@ REDIRECT_URI = "oauth_redirect_uri"
 CALLBACK_URI = "eventsub_callback_uri"
 OAUTH_TOKEN = "oauth_token"
 REFRESH_TOKEN = "refresh_token"
+USER_OAUTH = "user_oauth"
+USER_REFRESH = "user_refresh"
 APP_TOKEN = "app_token"
 SCOPES = "scopes"
 EVENTSUB_SECRET = "eventsub_secret"
@@ -34,6 +37,9 @@ class TwitchRestApi:
 
         self.oauth_token = self.props.get(OAUTH_TOKEN, "")
         self.refresh_token = self.props.get(REFRESH_TOKEN, "")
+
+        self.user_oauth = self.props.get(USER_OAUTH, "")
+        self.user_refresh = self.props.get(USER_REFRESH, "")
 
         self.app_token = self.props.get(APP_TOKEN, "")
 
@@ -84,12 +90,13 @@ class TwitchRestApi:
             return True
         return False
 
-    def validate_oauth_token(self):
+    def validate_oauth_token(self, user=False):
+        token = self.user_oauth if user else self.oauth_token
         url = AUTH_API_BASE + "validate"
-        headers = {"Authorization": "Bearer " + self.oauth_token}
+        headers = {"Authorization": "Bearer " + token}
         response = requests.get(url, headers=headers)
         if response != 200:
-            self.refresh_oauth_token()
+            self.refresh_oauth_token(user=user)
             return False
         return True
 
@@ -101,21 +108,31 @@ class TwitchRestApi:
             return self.refresh_app_token()
         return True
 
-    def refresh_oauth_token(self):
+    def refresh_oauth_token(self, user=False):
+        token = self.user_oauth if user else self.oauth_token
+        refresh = self.user_refresh if user else self.refresh_token
         url = AUTH_API_BASE + "token"
         params = {
             "client_id": self.client_id,
             "client_secret": self.client_secret,
             "grant_type": "refresh_token",
-            REFRESH_TOKEN: self.refresh_token
+            REFRESH_TOKEN: refresh
         }
         r = requests.post(url, params=params)
         data = r.json()
         if r.status_code == 200:
-            self.refresh_token = data.get(REFRESH_TOKEN)
-            self.oauth_token = data.get("access_token")
-            self.props[REFRESH_TOKEN] = self.refresh_token
-            self.props[OAUTH_TOKEN] = self.oauth_token
+            refresh = data.get(REFRESH_TOKEN)
+            token = data.get("access_token")
+            if user:
+                self.props[USER_REFRESH] = refresh
+                self.props[USER_OAUTH] = token
+                self.user_refresh = refresh
+                self.user_oauth = token
+            else:
+                self.props[REFRESH_TOKEN] = refresh
+                self.props[OAUTH_TOKEN] = token
+                self.refresh_token = refresh
+                self.oauth_token = token
             self.auth_props[TWTICH] = self.props
             with open(self.auth_filename, 'w') as f:
                 yaml.dump(self.auth_props, f)
@@ -149,6 +166,10 @@ class TwitchRestApi:
     def get_oauth_token(self):
         self.validate_oauth_token()
         return self.oauth_token
+
+    def get_user_oauth(self):
+        self.validate_oauth_token(user=True)
+        return self.user_oauth
 
     def get_channel_id(self, channel_name):
         self.validate_app_token()
@@ -190,6 +211,35 @@ class TwitchRestApi:
                 return data[0]
         return False
 
+    def get_clips(self, channel_name, started_at: str=None) -> list:
+        self.validate_app_token()
+        url = API_BASE + "clips"
+        headers = {
+            "Authorization": "Bearer " + self.app_token,
+            "Client-Id": self.client_id
+        }
+        channel_id = self.get_channel_id(channel_name)
+        params = {
+            "broadcaster_id": channel_id,
+            "started_at": started_at
+        }
+        r = requests.get(url, headers=headers, params=params)
+        if r.status_code == 200:
+            return r.json()['data']
+
+    def create_clip(self, channel_name):
+        self.validate_oauth_token(user=True)
+        url = API_BASE + "clips"
+        headers = {
+            "Authorization": "Bearer " + self.user_oauth,
+            "Client-Id": self.client_id
+        }
+        channel_id = self.get_channel_id(channel_name)
+        params = {
+            "broadcaster_id": channel_id,
+        }
+        r = requests.post(url, headers=headers, params=params)
+        print(r.content)
 
     def get_eventsub_subscriptions(self):
         self.validate_app_token()
@@ -260,5 +310,7 @@ class TwitchRestApi:
 
 if __name__ == "__main__":
     twitch_api = TwitchRestApi(auth_filename="config/botjamin_auth.yaml")
-    res = twitch_api.eventsub_add_subscription("beanjamin25", "channel.subscription.gift")
-    print(res)
+    a_week_ago = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+    a_week_ago_str = a_week_ago.strftime("%Y-%m-%dT00:00:00Z")
+    res = twitch_api.get_clips("beanjamin25", started_at=a_week_ago_str)
+    pprint(res)

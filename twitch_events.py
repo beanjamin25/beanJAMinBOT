@@ -34,10 +34,6 @@ class TwitchEvents:
         self.eventsub.listen_channel_follow(user_id, self.on_follow)
         self.eventsub.listen_channel_raid(user_id, self.on_raid)
         self.eventsub.listen_channel_points_redeem(user_id, self.on_points)
-        # self.context = zmq.Context()
-        # self.socket = self.context.socket(zmq.REP)
-        # # We can connect to several endpoints if we desire, and receive from all.
-        # self.socket.bind(f'tcp://{URL}:{PORT}')
 
     async def on_follow(self, data):
         event = data.get("event", {})
