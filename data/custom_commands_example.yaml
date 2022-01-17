@@ -1,0 +1,12 @@
+discord:
+  permission: moderator
+  text: <your discord link>
+  user: <username>
+fc:
+  permission: broadcaster
+  text: <your friend code here>
+  user: <username>
+lurk:
+  permission: broadcaster
+  text: thanks for the lurk! see ya later Squid4
+  user: <username>

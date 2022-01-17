@@ -57,9 +57,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         data_directory = os.path.join(current_dir, properties.get('data_directory', 'data'))
 
         custom_commands_file = properties.get('custom_command_file', None)
-        custom_commands_path = os.path.join(data_directory, custom_commands_file)
-        if os.path.exists(custom_commands_path):
-            self.init_custom_commands(custom_commands_path)
+        self.custom_commands_path = os.path.join(data_directory, custom_commands_file)
+        if os.path.exists(self.custom_commands_path):
+            self.custom_commands = yaml.safe_load(open(self.custom_commands_path))
 
         watchtime_config = properties.get('watchtime', dict())
         if watchtime_config.get("enabled", False):
@@ -148,7 +148,14 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         for d in event.tags:
             if d['key'] == "bits":
                 return True
+        return False
 
+    @staticmethod
+    def is_vip(event):
+        for d in event.tags:
+            if d['key'] == "badges":
+                if "vip/" in d['value']:
+                    return True
         return False
 
     def check_if_live_target(self, interval=5):
@@ -172,10 +179,54 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
         is_bits = self.is_bits(e)
 
+        is_vip = self.is_vip(e)
+
         if cmd in self.custom_commands:
-            msg = self.custom_commands.get(cmd)
+            msg = self.custom_commands[cmd]['text']
             c.privmsg(self.channel, msg)
-            return
+
+        elif cmd in ('addcommand', 'removecommand') and (user_has_mod or is_vip):
+            if cmd == "addcommand":
+                if len(args) < 2:
+                    c.privmsg(self.channel, "You need to have the new command do something, you silly goose!")
+                    return
+                new_cmd_arg = args[0].strip("!")
+                if new_cmd_arg in self.custom_commands:
+                    c.privmsg(self.channel, f"!{new_cmd_arg} is already a command!")
+                    return
+                new_cmd_txt = " ".join(args[1:])
+                permission = "moderator" if user_has_mod else "vip"
+                new_cmd = {
+                    "text": new_cmd_txt,
+                    "permission": permission,
+                    "user": user
+                }
+                self.custom_commands[new_cmd_arg] = new_cmd
+                with open(self.custom_commands_path, 'w') as f:
+                    yaml.dump(self.custom_commands, f)
+                c.privmsg(self.channel, f"Command '!{new_cmd_arg}' successfully added!")
+
+            elif cmd == "removecommand":
+                cmd_to_del = args[0].strip("!")
+                if cmd_to_del not in self.custom_commands:
+                    c.privmsg(self.channel, "You can't delete a command that doesn't exist!")
+                    return
+                cmd_params = self.custom_commands[cmd_to_del]
+                permissions = cmd_params['permission']
+                has_permission = False
+                if permissions == "broadcaster" and user == self.channel_name:
+                    has_permission = True
+                elif permissions in ("moderator", "vip") and user_has_mod:
+                    has_permission = True
+                elif permissions == "vip" and (user_has_mod or is_vip):
+                    has_permission = True
+                if has_permission:
+                    self.custom_commands.pop(cmd_to_del)
+                    with open(self.custom_commands_path, 'w') as f:
+                        yaml.dump(self.custom_commands, f)
+                    c.privmsg(self.channel, f"Command '!{cmd_to_del}' successfully removed.")
+                else:
+                    c.privmsg(self.channel, "You dont have permission to remove that command!")
 
         if (cmd == 'tts' or is_bits) and self.talk_bot is not None:
             msg = " ".join(args)
@@ -226,13 +277,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
         elif cmd in ['catch', 'pokedex'] and self.poke_game is not None:
             self.poke_game.do_command(cmd, user)
-
-    def init_custom_commands(self, custom_commands_filename):
-        with open(custom_commands_filename, 'r') as custom_commands_file:
-            for line in csv.DictReader(custom_commands_file, dialect='excel-tab'):
-                command = line['COMMAND']
-                message = line['MESSAGE']
-                self.custom_commands[command] = message
 
     def shoutout(self, twitch_channel):
         shoutout_msg = "Go checkout {user} at twitch.tv/{user}! They were last playing {game}!"
