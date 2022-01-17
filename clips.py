@@ -31,7 +31,6 @@ class Clips(threading.Thread):
         while True:
             try:
                 if self.clips_this_stream is None:
-                    print("no stream yet")
                     continue
 
                 clips = self.twitch.get_clips(self.channel_name, started_at=self.stream_started_at)
@@ -45,7 +44,6 @@ class Clips(threading.Thread):
             except Exception as e:
                 print(e)
             finally:
-                print("waiting")
                 time.sleep(1)
 
 
