@@ -1,6 +1,7 @@
 import csv
 import datetime
 import os
+import random
 import time
 from pprint import pprint
 
@@ -35,6 +36,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
     map_last_called = 0
 
     custom_commands = dict()
+    quotes = None
 
     def __init__(self, properties):
         try:
@@ -60,6 +62,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.custom_commands_path = os.path.join(data_directory, custom_commands_file)
         if os.path.exists(self.custom_commands_path):
             self.custom_commands = yaml.safe_load(open(self.custom_commands_path))
+
+        quotes_file = properties.get("quotes_file")
+        if quotes_file is not None:
+            self.quotes_path = os.path.join(data_directory, quotes_file)
+            if os.path.exists(self.quotes_path):
+                self.quotes = yaml.safe_load(open(self.quotes_path)) or list()
 
         watchtime_config = properties.get('watchtime', dict())
         if watchtime_config.get("enabled", False):
@@ -228,7 +236,38 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 else:
                     c.privmsg(self.channel, "You dont have permission to remove that command!")
 
-        if (cmd == 'tts' or is_bits) and self.talk_bot is not None:
+        elif (cmd == "quote" or cmd == "quotes") and self.quotes is not None and len(self.quotes) > 0:
+            if len(args) == 0:
+                quote_id = random.randint(0, len(self.quotes)-1)
+            else:
+                try:
+                    quote_id = int(args[0]) - 1
+                except ValueError:
+                    return
+                if quote_id < 0 or quote_id > len(self.quotes) - 1:
+                    return
+            quote = self.quotes[quote_id]
+            msg = f"{user}, Quote #{quote_id+1}: {quote}"
+            c.privmsg(self.channel, msg)
+
+        elif cmd == "addquote" and self.quotes is not None:
+            if len(args) < 1:
+                c.privmsg(self.channel, "You didn't give a quote, silly!")
+                return
+            quote = " ".join(args)
+            channel_id = self.twitch_api.get_channel_id(self.channel_name)
+            if not channel_id:
+                return ""
+            game = self.twitch_api.get_last_game_played(channel_id)
+            now_str = datetime.datetime.now().strftime("[%m/%d/%Y %H:%M:%S]")
+            final_quote = f"{quote} [{game}] {now_str}"
+            self.quotes.append(final_quote)
+            with open(self.quotes_path, 'w') as f:
+                yaml.dump(self.quotes, f)
+            quote_id = len(self.quotes)
+            c.privmsg(self.channel, f"{user}, you have successfully added quote #{quote_id}.")
+
+        elif (cmd == 'tts' or is_bits) and self.talk_bot is not None:
             msg = " ".join(args)
             self.talk_bot.add_msg_to_queue(msg)
 
