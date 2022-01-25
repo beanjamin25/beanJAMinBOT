@@ -173,7 +173,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
     def is_vip(event):
         for d in event.tags:
             if d['key'] == "badges":
-                if "vip/" in d['value']:
+                if d['value'] is not None and "vip/" in d['value']:
                     return True
         return False
 
