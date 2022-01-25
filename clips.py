@@ -16,12 +16,12 @@ class Clips(threading.Thread):
         self.connection = connection
         self.twitch = twitch_api
 
-        self.clips_this_stream: list = None
+        self.clips_this_stream: set = None
         self.stream_started_at: str = None
 
     def init_clips_for_stream(self, started_at):
         self.stream_started_at = started_at
-        self.clips_this_stream = self.twitch.get_clips(self.channel_name, started_at=started_at)
+        self.clips_this_stream = set(clip['id'] for clip in self.twitch.get_clips(self.channel_name, started_at=started_at))
         print(self.clips_this_stream)
 
     def reset_clips_for_stream(self):
@@ -34,15 +34,14 @@ class Clips(threading.Thread):
                     continue
 
                 clips = self.twitch.get_clips(self.channel_name, started_at=self.stream_started_at)
-                if len(clips) > len(self.clips_this_stream):
-                    new_clips = set(clips).difference(self.clips_this_stream)
-                    for clip in new_clips:
+                for clip in clips:
+                    if clip['id'] not in self.clips_this_stream:
                         clip_url = clip.get("url")
-                        self.connection(self.channel, clip_url)
-                    self.clips_this_stream = clips
+                        self.connection.privmsg(self.channel, clip_url)
+                        self.clips_this_stream.add(clip['id'])
 
             except Exception as e:
-                print(e)
+                print("error:", e)
             finally:
                 time.sleep(1)
 

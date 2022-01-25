@@ -239,7 +239,7 @@ class TwitchRestApi:
             "broadcaster_id": channel_id,
         }
         r = requests.post(url, headers=headers, params=params)
-        print(r.content)
+        return r
 
     def get_eventsub_subscriptions(self):
         self.validate_app_token()
