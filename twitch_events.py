@@ -1,6 +1,7 @@
 import logging
 import os
 
+import simpleobsws
 from playsound import playsound
 
 from twitch_eventsub import TwitchEventsub
@@ -17,7 +18,10 @@ sfx_dir = "data/sfx"
 
 class TwitchEvents:
 
-    def __init__(self, channel=None, connection=None, twitch_api: TwitchRestApi=None,
+    def __init__(self,
+                 channel=None,
+                 connection=None,
+                 twitch_api: TwitchRestApi=None,
                  sfx_directory="data/sfx", sfx_mappings={}):
         self.channel = channel
         self.connection = connection
@@ -56,3 +60,8 @@ class TwitchEvents:
         if reward_sfx:
             sfx_path = os.path.join(self.sfx_directory, reward_sfx)
             playsound(sfx_path)
+
+        elif reward_name == "Instant Replay":
+            ret = self.obs_control.call(simpleobsws.Request("TriggerHotkeyByName",{
+                "hotkeyName": "instant_replay.trigger"
+            }))

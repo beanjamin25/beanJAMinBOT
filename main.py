@@ -1,10 +1,12 @@
 import csv
 import datetime
+import logging
 import os
 import random
 import time
 from pprint import pprint
 
+import simpleobsws
 from dateutil.parser import isoparse
 from threading import Thread
 
@@ -13,6 +15,7 @@ import requests
 import yaml
 
 from clips import Clips
+from obs_control import ObsControl
 from twitch_rest_api import TwitchRestApi
 from gamble import SimpleGamble
 from watchtime import Watchtime
@@ -117,6 +120,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                                                  alert_sound_url,
                                                  self.auth_filename,
                                                  streamlabs_alerts=pokegame_config.get('streamlabs_alerts', False))
+
+        self.obs_control = ObsControl(password='GlVRHdkopGW63tbZ', log_level=logging.DEBUG)
+        self.obs_control.start()
 
         sfx_mappings = properties.get("sfx_mappings")
         if sfx_mappings is not None:

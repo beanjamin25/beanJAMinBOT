@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 import time
@@ -7,7 +8,6 @@ import asyncio
 import logging
 
 
-logging.basicConfig(level=logging.DEBUG)
 class ObsControl:
 
     __loop = None
@@ -57,6 +57,19 @@ class ObsControl:
         self.__thread = threading.Thread(target=self.__run_hook, daemon=True)
         self._running = True
         self.__thread.start()
+        self.wait_until_started()
+
+        self.register_callback(self.hide_finished_media, "MediaInputPlaybackEnded")
+        self.register_callback(self.on_replaybuffer_saved, "ReplayBufferSaved")
+
+    def wait_until_started(self, timeout=None):
+        start = time.time()
+        while True:
+            if self.ws is not None and self.ws.is_identified():
+                return
+            if timeout is not None and time.time() - start > timeout:
+                raise TimeoutError
+            time.sleep(0.1)
 
     def stop(self):
         tasks = {t for t in asyncio.all_tasks(loop=self.__loop) if not t.done()}
@@ -68,7 +81,7 @@ class ObsControl:
         self._running = False
 
     def call(self, request: simpleobsws.Request):
-        print(f"making call: {request.requestType}")
+        self.__logger.debug(f"making call: {request.requestType}")
         future = asyncio.run_coroutine_threadsafe(self.ws.call(request), self.__loop)
         return future.result()
 
@@ -76,63 +89,79 @@ class ObsControl:
         self.ws.register_event_callback(callback, event)
 
     async def __connect(self):
-        await self.ws.connect()
-        await self.ws.wait_until_identified()
-
-
+        while not self.ws.is_identified():
+            try:
+                await self.ws.connect()
+                await self.ws.wait_until_identified()
+            except ConnectionRefusedError:
+                self.__logger.error("OBS is not on, trying again in 5 secs...")
+                await asyncio.sleep(5)
 
     async def getSceneItemId(self, sceneName, sourceName):
-        print("getting sceneitemid")
         request = simpleobsws.Request("GetSceneItemId", {
             "sceneName": sceneName,
             "sourceName": sourceName
         })
         ret = await self.ws.call(request)
         if ret.ok():
-            print("got a result?")
             return int(ret.responseData.get("sceneItemId"))
         return False
 
+    async def hide_finished_media(self, eventData):
+        input_name = eventData.get("inputName")
+        input_id = await self.getSceneItemId("Main Scene", input_name)
+        await self.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
+            "sceneName": "Main Scene", "sceneItemId": input_id, "sceneItemEnabled": False
+        }))
 
-async def hide_finished_media(eventData):
-    print("hiding finished media?")
-    input_name = eventData.get("inputName")
-    print(f"input name: {input_name}")
-    input_id = await obs.getSceneItemId("Main Scene", input_name)
-    print(f"input id: {input_id}")
-    await obs.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
-        "sceneName": "Main Scene", "sceneItemId": input_id, "sceneItemEnabled": False
-    }))
+    async def on_replaybuffer_saved(self, eventData):
+        self.__logger.debug(eventData)
+        full_path = eventData.get("savedReplayPath")
+        dir = os.path.dirname(full_path)
+        filename = full_path.strip(dir)
+        for replay in os.listdir(dir):
+            if replay.startswith("Replay") and replay != filename:
+                os.remove(os.path.join(dir, replay))
+        sceneItemId = await self.getSceneItemId("Main Scene", "instant replay")
+        await asyncio.sleep(1)
+        await self.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
+            "sceneName": "Main Scene", "sceneItemId": sceneItemId, "sceneItemEnabled": True
+        }))
 
 
-async def on_switchscenes(eventData):
-    print(f"f{eventData}")
-
-async def on_replaybuffer_saved(eventData):
-    print("replay buffer is saved?")
-    sceneItemId = await obs.getSceneItemId("Main Scene", "instant replay")
-    print(f"sceneItemId: {sceneItemId}")
-    await asyncio.sleep(0.5)
-    res = await obs.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
-        "sceneName": "Main Scene", "sceneItemId": sceneItemId, "sceneItemEnabled": True
-    }))
-    print(res)
-
-if __name__ == "__main__":
-    obs = ObsControl(password='GlVRHdkopGW63tbZ', log_level=logging.DEBUG)
-    obs.start()
-    time.sleep(1)
-    obs.register_callback(on_replaybuffer_saved, "ReplayBufferSaved")
-    obs.register_callback(hide_finished_media, "MediaInputPlaybackEnded")
-    time.sleep(1)
-    request = request = simpleobsws.Request('TriggerHotkeyByName', {'hotkeyName': 'instant_replay.trigger'})
-    print(obs.call(request))
-    time.sleep(100)
-    obs.stop()
-    # loop = asyncio.get_event_loop()
-    # loop.run_until_complete(make_request())
-    # ws.register_event_callback(on_switchscenes, 'CurrentProgramSceneChanged')
-    # ws.register_event_callback(hide_finished_media, "MediaInputPlaybackEnded")
-    # ws.register_event_callback(on_replaybuffer_saved, "ReplayBufferSaved")
-    # loop.run_forever()
+# async def hide_finished_media(eventData):
+#     print("hiding finished media?")
+#     input_name = eventData.get("inputName")
+#     print(f"input name: {input_name}")
+#     input_id = await obs.getSceneItemId("Main Scene", input_name)
+#     print(f"input id: {input_id}")
+#     await obs.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
+#         "sceneName": "Main Scene", "sceneItemId": input_id, "sceneItemEnabled": False
+#     }))
+#
+#
+# async def on_switchscenes(eventData):
+#     print(f"f{eventData}")
+#
+# async def on_replaybuffer_saved(eventData):
+#     print("replay buffer is saved?")
+#     sceneItemId = await obs.getSceneItemId("Main Scene", "instant replay")
+#     print(f"sceneItemId: {sceneItemId}")
+#     await asyncio.sleep(0.5)
+#     res = await obs.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
+#         "sceneName": "Main Scene", "sceneItemId": sceneItemId, "sceneItemEnabled": True
+#     }))
+#     print(res)
+#
+# if __name__ == "__main__":
+#     obs = ObsControl(password='GlVRHdkopGW63tbZ', log_level=logging.DEBUG)
+#     obs.start()
+#     #obs.wait_until_started()
+#     print("identified!")
+#     obs.register_callback(on_replaybuffer_saved, "ReplayBufferSaved")
+#     obs.register_callback(hide_finished_media, "MediaInputPlaybackEnded")
+#     time.sleep(1)
+#     request = request = simpleobsws.Request('TriggerHotkeyByName', {'hotkeyName': 'instant_replay.trigger'})
+#     print(obs.call(request))
+#     t
 
