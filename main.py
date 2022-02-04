@@ -131,6 +131,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             self.twitch_eventsub = TwitchEvents(channel=self.channel,
                                                 connection=self.connection,
                                                 twitch_api=self.twitch_api,
+                                                obs_control=self.obs_control,
                                                 sfx_directory=sfx_directory,
                                                 sfx_mappings=sfx_mappings)
 
@@ -296,7 +297,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             quote_id = len(self.quotes)
             c.privmsg(self.channel, f"{user}, you have successfully added quote #{quote_id}.")
 
-        elif (cmd == 'tts' or is_bits) and self.talk_bot is not None:
+        elif (cmd == 'tts' or is_bits) and self.talk_bot is not None and len(args) > 0:
             msg = " ".join(args)
             self.talk_bot.add_msg_to_queue(msg)
 

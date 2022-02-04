@@ -4,6 +4,7 @@ import os
 import simpleobsws
 from playsound import playsound
 
+from obs_control import ObsControl
 from twitch_eventsub import TwitchEventsub
 from twitch_rest_api import TwitchRestApi
 
@@ -22,11 +23,14 @@ class TwitchEvents:
                  channel=None,
                  connection=None,
                  twitch_api: TwitchRestApi=None,
+                 obs_control: ObsControl=None,
                  sfx_directory="data/sfx", sfx_mappings={}):
         self.channel = channel
         self.connection = connection
         self.sfx_directory = sfx_directory
         self.sfx_mappings = sfx_mappings
+
+        self.obs_control = obs_control
 
         self.eventsub = TwitchEventsub(port=8008,
                                        twitch=twitch_api,
