@@ -198,6 +198,16 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 self.watchtime.stream_flag = False
             time.sleep(interval)
 
+    def check_permissions(self, cmd, user, user_has_mod, is_vip):
+        permissions = cmd['permission']
+        if permissions == "broadcaster" and user == self.channel_name:
+            return True
+        elif permissions in ("moderator", "vip") and user_has_mod:
+            return True
+        elif permissions == "vip" and (user_has_mod or is_vip):
+            return True
+        return False
+
     def do_command(self, e, user, cmd, args):
         c = self.connection
 
@@ -211,7 +221,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         is_vip = self.is_vip(e)
 
         if cmd in self.custom_commands:
-            msg = self.custom_commands[cmd]['text']
+            count = self.custom_commands[cmd].get('count')
+            if count is not None:
+                self.custom_commands[cmd]['count'] = count + 1
+                with open(self.custom_commands_path, 'w') as f:
+                    yaml.dump(self.custom_commands, f)
+            msg = self.custom_commands[cmd]['text'].format(*args, user=user, count=count)
             c.privmsg(self.channel, msg)
 
         elif cmd == "clip":
@@ -223,14 +238,28 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             else:
                 print(res.content)
 
-        elif cmd in ('addcommand', 'removecommand') and (user_has_mod or is_vip):
+        elif cmd in ('commands', 'addcommand', 'updatecommand', 'removecommand') and (user_has_mod or is_vip):
+            if cmd == "commands":
+                if len(args) >= 1:
+                    action = args[0]
+                    args = args[1:]
+                    if action == "add":
+                        cmd = "addcommand"
+                    elif action == "update":
+                        cmd = "updatecommand"
+                    elif action in ("delete", "remove"):
+                        cmd = "removecommand"
+                    else:
+                        c.privmsg(self.channel, "The only valid actions on commands are ['add', 'update', 'remove'].")
+                        return
+
             if cmd == "addcommand":
                 if len(args) < 2:
                     c.privmsg(self.channel, "You need to have the new command do something, you silly goose!")
                     return
                 new_cmd_arg = args[0].strip("!")
                 if new_cmd_arg in self.custom_commands:
-                    c.privmsg(self.channel, f"!{new_cmd_arg} is already a command!")
+                    c.privmsg(self.channel, f"!{new_cmd_arg} is already a command! Use !updatecommand or !commands update to change it!")
                     return
                 new_cmd_txt = " ".join(args[1:])
                 permission = "moderator" if user_has_mod else "vip"
@@ -239,10 +268,33 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                     "permission": permission,
                     "user": user
                 }
+                if "{count}" in new_cmd_txt:
+                    new_cmd['count'] = 0
                 self.custom_commands[new_cmd_arg] = new_cmd
                 with open(self.custom_commands_path, 'w') as f:
                     yaml.dump(self.custom_commands, f)
                 c.privmsg(self.channel, f"Command '!{new_cmd_arg}' successfully added!")
+
+            elif cmd == "updatecommand":
+                if len(args) < 2:
+                    c.privmsg(self.channel, "You need to have to give the command something to do, silly!")
+                    return
+
+                cmd_to_update = args[0].strip("!")
+                if cmd_to_update not in self.custom_commands:
+                    c.privmsg(self.channel, "You can't update a command that doesn't exist yet! Use !addcommand or !commands add to add the command first.")
+                    return
+
+                cmd_params = self.custom_commands[cmd_to_update]
+                has_permission = self.check_permissions(cmd_params, user, user_has_mod, is_vip)
+                if not has_permission:
+                    c.privmsg(self.channel, "You dont have permission to do that!")
+                    return
+                cmd_params["text"] = " ".join(args[1:])
+                self.custom_commands[cmd_to_update] = cmd_params
+                with open(self.custom_commands_path, 'w') as f:
+                    yaml.dump(self.custom_commands, f)
+                c.privmsg(self.channel, f"Command '!{cmd_to_update}' successfully updated!")
 
             elif cmd == "removecommand":
                 cmd_to_del = args[0].strip("!")
@@ -250,14 +302,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                     c.privmsg(self.channel, "You can't delete a command that doesn't exist!")
                     return
                 cmd_params = self.custom_commands[cmd_to_del]
-                permissions = cmd_params['permission']
-                has_permission = False
-                if permissions == "broadcaster" and user == self.channel_name:
-                    has_permission = True
-                elif permissions in ("moderator", "vip") and user_has_mod:
-                    has_permission = True
-                elif permissions == "vip" and (user_has_mod or is_vip):
-                    has_permission = True
+                has_permission = self.check_permissions(cmd_params, user, user_has_mod, is_vip)
                 if has_permission:
                     self.custom_commands.pop(cmd_to_del)
                     with open(self.custom_commands_path, 'w') as f:
