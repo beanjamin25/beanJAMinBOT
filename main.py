@@ -379,11 +379,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             if time.time() - self.map_last_called < self.map_timeout:
                 return
             self.map_last_called = time.time()
-            queue = None
+            queue = "gachi"
             if len(args) > 0:
-                queue = self.schedule.queue_mappings.get(args[0])
+                queue = self.schedule.queue_mappings.get(args[0], "gachi")
             for q in ['gachi', 'league', 'regular']:
-                if queue is None or q == queue:
+                if queue == "all" or q == queue:
                     c.privmsg(self.channel, self.schedule.get_maps(q))
 
         elif cmd in ['points', 'gamble', 'borrow', 'payback'] and self.gamble is not None:

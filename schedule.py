@@ -18,7 +18,8 @@ class Schedule:
         "ranked": "gachi",
         "league": "league",
         "turf": "regular",
-        "regular": "regular"
+        "regular": "regular",
+        "all": "all"
     }
 
     def get_maps(self, queue="gachi"):
