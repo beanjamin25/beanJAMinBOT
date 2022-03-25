@@ -307,10 +307,21 @@ class TwitchRestApi:
         print(r.status_code)
         pprint(r.json())
 
+    def get_subscribers(self, channel_name):
+        self.validate_oauth_token(user=True)
+        url = API_BASE + "subscriptions"
+        headers = {
+            "Authorization": "Bearer " + self.user_oauth,
+            "Client-ID": self.client_id,
+            "Content-Type": "application/json"
+        }
+        channel_id = self.get_channel_id(channel_name)
+
+        r = requests.get(url, headers=headers, params={"broadcaster_id": channel_id})
+        return r.json()
+
 
 if __name__ == "__main__":
     twitch_api = TwitchRestApi(auth_filename="config/botjamin_auth.yaml")
-    a_week_ago = datetime.datetime.utcnow() - datetime.timedelta(days=7)
-    a_week_ago_str = a_week_ago.strftime("%Y-%m-%dT00:00:00Z")
-    res = twitch_api.get_clips("beanjamin25", started_at=a_week_ago_str)
+    res = twitch_api.get_subscribers("beanjamin25")
     pprint(res)
