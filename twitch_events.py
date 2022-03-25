@@ -1,5 +1,8 @@
 import logging
 import os
+import queue
+import threading
+import time
 
 import simpleobsws
 from playsound import playsound
@@ -30,6 +33,8 @@ class TwitchEvents:
         self.sfx_directory = sfx_directory
         self.sfx_mappings = sfx_mappings
 
+        self.points_queue = queue.Queue()
+
         self.obs_control = obs_control
 
         self.eventsub = TwitchEventsub(port=8008,
@@ -42,6 +47,8 @@ class TwitchEvents:
         self.eventsub.listen_channel_follow(user_id, self.on_follow)
         self.eventsub.listen_channel_raid(user_id, self.on_raid)
         self.eventsub.listen_channel_points_redeem(user_id, self.on_points)
+
+        threading.Thread(target=self.points_worker, daemon=True).start()
 
     async def on_follow(self, data):
         event = data.get("event", {})
@@ -57,15 +64,31 @@ class TwitchEvents:
         self.connection.privmsg(self.channel, raided_msg)
 
     async def on_points(self, data):
-        event = data.get("event", {})
-        reward = event['reward']
-        reward_name = reward['title']
-        reward_sfx = self.sfx_mappings.get(reward_name)
-        if reward_sfx:
-            sfx_path = os.path.join(self.sfx_directory, reward_sfx)
-            playsound(sfx_path)
+        self.points_queue.put(data)
 
-        elif reward_name == "Instant Replay":
-            ret = self.obs_control.call(simpleobsws.Request("TriggerHotkeyByName",{
-                "hotkeyName": "instant_replay.trigger"
-            }))
+    def points_worker(self):
+        while True:
+            data = self.points_queue.get()
+            event = data.get("event", {})
+            reward = event['reward']
+            reward_name = reward['title']
+            reward_sfx = self.sfx_mappings.get(reward_name)
+            if reward_sfx:
+                sfx_path = os.path.join(self.sfx_directory, reward_sfx)
+                playsound(sfx_path)
+
+            elif reward_name == "Instant Replay":
+                self.obs_control.call(simpleobsws.Request("TriggerHotkeyByName",{
+                    "hotkeyName": "instant_replay.trigger"
+                }))
+                time.sleep(32)
+
+            elif reward_name == "Lets Gooooooooo!":
+                self.obs_control.show_source("lets go")
+                time.sleep(5)
+
+            elif reward_name == "Nooooooooo!":
+                self.obs_control.show_source("nooooo")
+                time.sleep(5)
+
+            self.points_queue.task_done()

@@ -57,15 +57,16 @@ class ObsControl:
         self.__thread = threading.Thread(target=self.__run_hook, daemon=True)
         self._running = True
         self.__thread.start()
-        self.wait_until_started()
 
-        self.register_callback(self.hide_finished_media, "MediaInputPlaybackEnded")
-        self.register_callback(self.on_replaybuffer_saved, "ReplayBufferSaved")
+        threading.Thread(target=self.wait_until_started, daemon=True).start()
+
 
     def wait_until_started(self, timeout=None):
         start = time.time()
         while True:
             if self.ws is not None and self.ws.is_identified():
+                self.register_callback(self.hide_finished_media, "MediaInputPlaybackEnded")
+                self.register_callback(self.on_replaybuffer_saved, "ReplayBufferSaved")
                 return
             if timeout is not None and time.time() - start > timeout:
                 raise TimeoutError
@@ -83,7 +84,12 @@ class ObsControl:
     def call(self, request: simpleobsws.Request):
         self.__logger.debug(f"making call: {request.requestType}")
         future = asyncio.run_coroutine_threadsafe(self.ws.call(request), self.__loop)
-        return future.result()
+        return future
+
+    def show_source(self, source_name):
+        sourceId = asyncio.run_coroutine_threadsafe(self.getSceneItemId("Main Scene", source_name), self.__loop).result()
+        self.__logger.debug(f"sourceId: {sourceId}")
+        asyncio.run_coroutine_threadsafe(self.show_media(sourceId), self.__loop)
 
     def register_callback(self, callback, event):
         self.ws.register_event_callback(callback, event)
@@ -110,9 +116,17 @@ class ObsControl:
     async def hide_finished_media(self, eventData):
         input_name = eventData.get("inputName")
         input_id = await self.getSceneItemId("Main Scene", input_name)
+        self.__logger.debug(f"making call SetSceneItemEnabled: {input_id} false")
         await self.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
             "sceneName": "Main Scene", "sceneItemId": input_id, "sceneItemEnabled": False
         }))
+
+    async def show_media(self, sourceId):
+        self.__logger.debug(f"making call SetSceneItemEnabled: {sourceId} true")
+        await self.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
+            "sceneName": "Main Scene", "sceneItemId": sourceId, "sceneItemEnabled": True
+        }))
+
 
     async def on_replaybuffer_saved(self, eventData):
         self.__logger.debug(eventData)
@@ -124,9 +138,7 @@ class ObsControl:
                 os.remove(os.path.join(dir, replay))
         sceneItemId = await self.getSceneItemId("Main Scene", "instant replay")
         await asyncio.sleep(1)
-        await self.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
-            "sceneName": "Main Scene", "sceneItemId": sceneItemId, "sceneItemEnabled": True
-        }))
+        await self.show_media(sceneItemId)
 
 
 # async def hide_finished_media(eventData):
