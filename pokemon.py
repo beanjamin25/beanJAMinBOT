@@ -34,7 +34,7 @@ class PokemonChatGame:
         self.pokeballs_by_user = dict()
         self.init_pokeballs = 5
 
-        self.shiny_odds = 4096
+        self.shiny_odds = 256
 
         self.streamlabs = None
         if streamlabs_alerts:
