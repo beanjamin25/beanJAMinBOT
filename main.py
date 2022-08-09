@@ -404,7 +404,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             c.privmsg(self.channel, f"{days_until_sploon3.days} days until Splatoon 3!!!!!!!!!!!!!!")
 
     def shoutout(self, twitch_channel):
-        shoutout_msg = "Go checkout {user} at twitch.tv/{user}! They were last playing {game}!"
+        shoutout_msg = "/announce Go checkout {user} at twitch.tv/{user}! They were last playing {game}!"
         channel_id = self.twitch_api.get_channel_id(twitch_channel)
         if not channel_id:
             return ""
