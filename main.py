@@ -397,6 +397,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         elif cmd in ['catch', 'pokedex'] and self.poke_game is not None:
             self.poke_game.do_command(cmd, user)
 
+        elif cmd == "sploon3":
+            sploon3_release_date = datetime.date(2022, 9, 9)
+            today = datetime.date.today()
+            days_until_sploon3 = sploon3_release_date - today
+            c.privmsg(self.channel, f"{days_until_sploon3.days} days until Splatoon 3!!!!!!!!!!!!!!")
+
     def shoutout(self, twitch_channel):
         shoutout_msg = "Go checkout {user} at twitch.tv/{user}! They were last playing {game}!"
         channel_id = self.twitch_api.get_channel_id(twitch_channel)
