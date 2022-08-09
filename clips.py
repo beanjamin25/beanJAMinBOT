@@ -7,13 +7,14 @@ from twitch_rest_api import TwitchRestApi
 
 class Clips(threading.Thread):
 
-    def __init__(self, channel=None, channel_name=None, connection=None, twitch_api: TwitchRestApi=None):
+    def __init__(self, channel=None, channel_name=None, connection=None, bot_name=None, twitch_api: TwitchRestApi=None):
         threading.Thread.__init__(self)
         self.daemon = True
 
         self.channel = channel
         self.channel_name = channel_name
         self.connection = connection
+        self.bot_name = bot_name
         self.twitch = twitch_api
 
         self.clips_this_stream: set = None
@@ -27,6 +28,9 @@ class Clips(threading.Thread):
     def reset_clips_for_stream(self):
         self.clips_this_stream = None
 
+    def add_clip(self, clip_id):
+        self.clips_this_stream.add(clip_id)
+
     def run(self) -> None:
         while True:
             try:
@@ -35,7 +39,7 @@ class Clips(threading.Thread):
 
                 clips = self.twitch.get_clips(self.channel_name, started_at=self.stream_started_at)
                 for clip in clips:
-                    if clip['id'] not in self.clips_this_stream:
+                    if clip['id'] not in self.clips_this_stream and clip['creator_name'].lower() != self.bot_name:
                         clip_url = clip.get("url")
                         self.connection.privmsg(self.channel, clip_url)
                         self.clips_this_stream.add(clip['id'])

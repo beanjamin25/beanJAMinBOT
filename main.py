@@ -235,6 +235,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             res = self.twitch_api.create_clip(self.channel_name)
             if res.status_code < 400:
                 self.clip_last_called = time.time()
+                clip_data = res.json().get("data")
+                for clip in clip_data:
+                    self.clip_bot.add_clip(clip['id'])
+                    clip_url = clip['edit_url'].split("/edit")[0]
+                    c.privmsg(self.channel, clip_url)
             else:
                 print(res.content)
 
