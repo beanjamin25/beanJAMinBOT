@@ -8,6 +8,7 @@ import simpleobsws
 from playsound import playsound
 
 from obs_control import ObsControl
+from tts import TalkBot
 from twitch_eventsub import TwitchEventsub
 from twitch_rest_api import TwitchRestApi
 
@@ -22,16 +23,22 @@ sfx_dir = "data/sfx"
 
 class TwitchEvents:
 
+    talk_bot = None
+
     def __init__(self,
                  channel=None,
                  connection=None,
                  twitch_api: TwitchRestApi=None,
                  obs_control: ObsControl=None,
+                 talk_config=None,
                  sfx_directory="data/sfx", sfx_mappings={}):
         self.channel = channel
         self.connection = connection
         self.sfx_directory = sfx_directory
         self.sfx_mappings = sfx_mappings
+
+        if talk_config:
+            self.talk_bot = TalkBot(config=talk_config)
 
         self.points_queue = queue.Queue()
 
@@ -47,6 +54,7 @@ class TwitchEvents:
         self.eventsub.listen_channel_follow(user_id, self.on_follow)
         self.eventsub.listen_channel_raid(user_id, self.on_raid)
         self.eventsub.listen_channel_points_redeem(user_id, self.on_points)
+        self.eventsub.listen_channel_subscription_message(user_id, self.on_sub_message)
 
         threading.Thread(target=self.points_worker, daemon=True).start()
 
@@ -66,16 +74,28 @@ class TwitchEvents:
     async def on_points(self, data):
         self.points_queue.put(data)
 
+    async def on_sub_message(self, data):
+        event = data.get("event", {})
+        message = event['message']['text']
+        event['user_input'] = message
+        event['reward']['title'] = 'tts'
+        self.points_queue.put(data)
+
+
     def points_worker(self):
         while True:
             data = self.points_queue.get()
             event = data.get("event", {})
             reward = event['reward']
             reward_name = reward['title']
+            user_input = event.get("user_input")
             reward_sfx = self.sfx_mappings.get(reward_name)
             if reward_sfx:
                 sfx_path = os.path.join(self.sfx_directory, reward_sfx)
                 playsound(sfx_path)
+
+            elif reward_name == "tts" and user_input is not None and self.talk_bot is not None:
+                self.talk_bot.read_msg(user_input)
 
             elif reward_name == "Instant Replay":
                 self.obs_control.call(simpleobsws.Request("TriggerHotkeyByName",{

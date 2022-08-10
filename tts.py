@@ -19,7 +19,7 @@ class TalkBot:
         self.engine.setProperty('rate', config.get('rate', 150))
         self.kill_flag = False
         self.queue = queue.Queue()
-        self.speaking_thread = Thread(target=self.read_msg, daemon=True)
+        self.speaking_thread = Thread(target=self.read_msg_thread, daemon=True)
         self.speaking_thread.start()
 
     def stop(self):
@@ -28,10 +28,15 @@ class TalkBot:
     def add_msg_to_queue(self, msg):
         self.queue.put(msg)
 
-    def read_msg(self):
+    def read_msg_thread(self):
         while not self.kill_flag:
             msg_to_speak = self.queue.get()
             time.sleep(0.5)
             self.engine.say(msg_to_speak)
             self.engine.runAndWait()
             self.queue.task_done()
+
+    def read_msg(self, msg):
+        time.sleep(0.5)
+        self.engine.say(msg)
+        self.engine.runAndWait()

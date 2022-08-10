@@ -268,3 +268,8 @@ class TwitchEventsub:
         }
         return self._subscribe('channel.channel_points_custom_reward_redemption.add', condition, callback)
 
+    def listen_channel_subscription_message(self, broadcaster_user_id, callback):
+        condition = {
+            'broadcaster_user_id': broadcaster_user_id
+        }
+        return self._subscribe('channel.subscription.message', condition, callback)

@@ -132,8 +132,10 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                                                 connection=self.connection,
                                                 twitch_api=self.twitch_api,
                                                 obs_control=self.obs_control,
+                                                talk_config=tts_config,
                                                 sfx_directory=sfx_directory,
                                                 sfx_mappings=sfx_mappings)
+            self.sfx_queue = self.twitch_eventsub.points_queue
 
     def on_welcome(self, c, e):
         print("Welcome!")
@@ -172,8 +174,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
     @staticmethod
     def is_bits(event):
         for d in event.tags:
-            if d['key'] == "bits":
-                return True
+            if d['key'] == "badges":
+                if d['value'] is not None and "bits/" in d['value']:
+                    return True
         return False
 
     @staticmethod
@@ -349,7 +352,15 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
         elif (cmd == 'tts' or is_bits) and self.talk_bot is not None and len(args) > 0:
             msg = " ".join(args)
-            self.talk_bot.add_msg_to_queue(msg)
+            payload = {
+                "event": {
+                    "reward": {
+                        "title": "tts"
+                    },
+                    "user_input": msg
+                }
+            }
+            self.sfx_queue.put(payload)
 
         elif cmd == 'watchtime' and self.watchtime is not None:
             if len(args) == 0:
