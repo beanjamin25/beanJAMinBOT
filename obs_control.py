@@ -17,6 +17,8 @@ class ObsControl:
     ws = None
     __callbacks = {}
 
+    shown_media = set()
+
     def __init__(self, url='ws://localhost:4444', password='', log_level=logging.ERROR):
 
         self.url = url
@@ -116,13 +118,18 @@ class ObsControl:
     async def hide_finished_media(self, eventData):
         input_name = eventData.get("inputName")
         input_id = await self.getSceneItemId("Main Scene", input_name)
-        self.__logger.debug(f"making call SetSceneItemEnabled: {input_id} false")
+        if input_id not in self.shown_media:
+            self.__logger.debug(f"{input_name} is not in the previously shown media!")
+            return
+        self.shown_media.remove(input_id)
+        self.__logger.debug(f"making call SetSceneItemEnabled: {input_name} false")
         await self.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
             "sceneName": "Main Scene", "sceneItemId": input_id, "sceneItemEnabled": False
         }))
 
     async def show_media(self, sourceId):
         self.__logger.debug(f"making call SetSceneItemEnabled: {sourceId} true")
+        self.shown_media.add(sourceId)
         await self.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
             "sceneName": "Main Scene", "sceneItemId": sourceId, "sceneItemEnabled": True
         }))
