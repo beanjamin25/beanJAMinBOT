@@ -133,6 +133,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                                                 twitch_api=self.twitch_api,
                                                 obs_control=self.obs_control,
                                                 talk_config=tts_config,
+                                                poke_game=self.poke_game,
                                                 sfx_directory=sfx_directory,
                                                 sfx_mappings=sfx_mappings)
             self.sfx_queue = self.twitch_eventsub.points_queue
@@ -405,7 +406,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         elif cmd in ['points', 'gamble', 'borrow', 'payback'] and self.gamble is not None:
             self.gamble.do_command(cmd, user, args)
 
-        elif cmd in ['catch', 'pokedex'] and self.poke_game is not None:
+        elif cmd in ['catch', 'pokedex', 'standings'] and self.poke_game is not None:
             self.poke_game.do_command(cmd, user)
 
         elif cmd == "sploon3":

@@ -7,8 +7,11 @@ import time
 import simpleobsws
 from playsound import playsound
 
+import vlc
+
 from obs_control import ObsControl
 from tts import TalkBot
+from pokemon import PokemonChatGame
 from twitch_eventsub import TwitchEventsub
 from twitch_rest_api import TwitchRestApi
 
@@ -30,6 +33,7 @@ class TwitchEvents:
                  connection=None,
                  twitch_api: TwitchRestApi=None,
                  obs_control: ObsControl=None,
+                 poke_game: PokemonChatGame=None,
                  talk_config=None,
                  sfx_directory="data/sfx", sfx_mappings={}):
         self.channel = channel
@@ -39,6 +43,8 @@ class TwitchEvents:
 
         if talk_config:
             self.talk_bot = TalkBot(config=talk_config)
+
+        self.poke_game = poke_game
 
         self.points_queue = queue.Queue()
 
@@ -89,10 +95,15 @@ class TwitchEvents:
             reward = event['reward']
             reward_name = reward['title']
             user_input = event.get("user_input")
+            user = event.get("user_login")
             reward_sfx = self.sfx_mappings.get(reward_name)
             if reward_sfx:
                 sfx_path = os.path.join(self.sfx_directory, reward_sfx)
-                playsound(sfx_path)
+                print("playing this sound: " + sfx_path)
+                p = vlc.MediaPlayer(sfx_path)
+                p.play()
+                #playsound(sfx_path)
+                print("played it")
 
             elif reward_name == "tts" and user_input is not None and self.talk_bot is not None:
                 self.talk_bot.read_msg(user_input)
@@ -110,5 +121,10 @@ class TwitchEvents:
             elif reward_name == "Nooooooooo!":
                 self.obs_control.show_source("nooooo")
                 time.sleep(5)
+
+            elif reward_name == "pokeballs":
+                print(event)
+                if self.poke_game is not None:
+                    self.poke_game.add_pokeballs(user)
 
             self.points_queue.task_done()

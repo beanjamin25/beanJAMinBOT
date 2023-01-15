@@ -1,4 +1,6 @@
 import csv
+import heapq
+import pprint
 import random
 import time
 from collections import defaultdict
@@ -67,6 +69,9 @@ class PokemonChatGame:
         elif cmd == "pokedex":
             c.privmsg(self.channel, self.pokedex_statement(user))
 
+        elif cmd == "standings":
+            c.privmsg(self.channel, self.pokedex_standings_statement())
+
     def catch(self, user):
 
         if time.time() - self.cooldown_dict[user] < COOLDOWN:
@@ -93,6 +98,14 @@ class PokemonChatGame:
 
         return pokemon, first_caught, is_shiny, is_shiny_first
 
+    def add_pokeballs(self, user):
+        if user not in self.pokeballs_by_user:
+            self.pokeballs_by_user[user] = self.init_pokeballs
+
+        self.pokeballs_by_user[user] += self.init_pokeballs
+        self.connection.privmsg(self.channel, f"{user}, you now have {self.pokeballs_by_user[user]} pokeballs!")
+
+
     def pokedex_statement(self, user):
         pokedex = self.user_pokedex.get_user_pokedex(user)
         num_caught = len(pokedex.get(CAUGHT))
@@ -108,6 +121,19 @@ class PokemonChatGame:
         msg += f" and you have {remaining_pokeballs} pokeballs left!"
         return msg
 
+    def pokedex_standings_statement(self, num=5):
+        num_most_pokemon = self.user_pokedex.pokedex_standings(num)
+
+        statement = f"Current standings: "
+        rank = 0
+        for info in num_most_pokemon:
+            rank += 1
+            statement += f"{rank}: {info[2]} with {info[0]} pokemon"
+            if info[1] > 0:
+                statement += f" and {info[1]} shinies!"
+            statement += "\t"
+
+        return statement
 
 class Pokedex:
 
@@ -142,6 +168,14 @@ class Pokedex:
     def get_user_pokedex(self, user):
         return self.pokedex_by_user.get(user, {CAUGHT: set(), SHINY: set()})
 
+    def pokedex_standings(self, num=None):
+        pokedex_heap = list()
+        for user, pokemon in self.pokedex_by_user.items():
+            pokedex_heap.append((len(pokemon.get(CAUGHT)), len(pokemon.get(SHINY)), user))
+        if num:
+            return heapq.nlargest(num, pokedex_heap)
+        return heapq.nlargest(len(pokedex_heap), pokedex_heap)
+
 
 class PokeDB:
 
@@ -166,27 +200,7 @@ class PokeDB:
         return self.pokedex.get(random.choice(catchable))
 
 
-# if __name__ == "__main__":
-#     poke_game = PokemonChatGame("data/pokemon/pokeDB.csv", "data/pokemon/pokedex.yaml", "botjamin_auth.yaml")
-#     counter = 0
-#     while True:
-#         try:
-#             pokemon, first_caught, is_shiny, is_shiny_first = poke_game.catch("beanjamin25")
-#             p_name = pokemon.get(NAME).title()
-#             msg = f"beanjamin25, you caught a {p_name}!"
-#             if is_shiny:
-#                 msg += " and it was a shiny!"
-#
-#             print(msg + " " + poke_game.pokedex_statement("beanjamin25"))
-#             time.sleep(2)
-#
-#         except NoMorePokeballsException as e:
-#             print(e)
-#             break
-#         except CooldownException as e:
-#             print(e)
-#             time.sleep(2)
-#
-#         counter += 1
-#
-#     print(counter)
+if __name__ == "__main__":
+    poke_game = PokemonChatGame(pokedb="data/pokemon/pokeDB.csv", pokedex="data/pokemon/pokedex.yaml",auth_filename="botjamin_auth.yaml",sfx_url_base="",channel="",connection="")
+    pokedex_standings = poke_game.pokedex_standings_statement()
+    print(pokedex_standings)
