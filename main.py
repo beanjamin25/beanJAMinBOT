@@ -376,6 +376,27 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             msg = f"{user} has watched for {hours} hours, {minutes} minutes, and {seconds} seconds"
             c.privmsg(self.channel, msg)
 
+        elif cmd == 'followage':
+            follow_age = self.twitch_api.get_followage(self.channel_name, user)
+            if not follow_age:
+                c.privmsg(self.channel, f"Silly {user}, you don't even follow {self.channel_name} yet! Go and give them a follow right now :-o")
+                return
+            msg = f"{user}, you have been following for "
+            if follow_age.years:
+                msg += f"{follow_age.years} year{'s' if follow_age.years != 1 else ''}, "
+            if follow_age.months:
+                msg += f"{follow_age.months} month{'s' if follow_age.months != 1 else ''}, "
+            if follow_age.days or follow_age.months:
+                msg += f"{follow_age.days} day{'s' if follow_age.days != 1 else ''}, "
+            if follow_age.hours or follow_age.days:
+                msg += f"{follow_age.hours} hour{'s' if follow_age.hours != 1 else ''}, "
+            if follow_age.minutes or follow_age.hours:
+                msg += f"{follow_age.minutes} minute{'s' if follow_age.minutes != 1 else ''}, "
+            msg += f"{follow_age.seconds} second{'s' if follow_age.seconds != 1 else ''}"
+
+            c.privmsg(self.channel, msg)
+
+
         elif cmd == 'so' and user_has_mod:
             streamer = args[0].replace('@', '')
             shoutout_msg = self.shoutout(streamer)
@@ -409,14 +430,8 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         elif cmd in ['catch', 'pokedex', 'standings'] and self.poke_game is not None:
             self.poke_game.do_command(cmd, user)
 
-        elif cmd == "sploon3":
-            sploon3_release_date = datetime.date(2022, 9, 9)
-            today = datetime.date.today()
-            days_until_sploon3 = sploon3_release_date - today
-            c.privmsg(self.channel, f"{days_until_sploon3.days} days until Splatoon 3!!!!!!!!!!!!!!")
-
     def shoutout(self, twitch_channel):
-        shoutout_msg = "/announce Go checkout {user} at twitch.tv/{user}! They were last playing {game}!"
+        shoutout_msg = "Go checkout {user} at twitch.tv/{user}! They were last playing {game}!"
         channel_id = self.twitch_api.get_channel_id(twitch_channel)
         if not channel_id:
             return ""

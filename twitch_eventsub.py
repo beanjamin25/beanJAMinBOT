@@ -50,6 +50,7 @@ class TwitchEventsub:
         self._port = port
         self.__twitch = twitch
         self.callback_url = self.__twitch.callback_uri
+        self.secret = self.__twitch.eventsub_secret
 
         formatter = logging.Formatter("[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s")
 
@@ -134,21 +135,10 @@ class TwitchEventsub:
     def __enable_callback(self, callback_id):
         self.__callbacks[callback_id]['active'] = True
 
-    def _subscribe(self, sub_type, condition, callback):
+    def _subscribe(self, sub_type, condition, callback, version='1'):
         self.__logger.debug(f"subscribe to {sub_type} with condtion {condition}")
 
-        sub_data = {
-            'type': sub_type,
-            'version': "1",
-            'condition': condition,
-            'transport': {
-                'method': 'webhook',
-                'callback': f'{self.callback_url}/callback',
-                'secret': self.secret
-            }
-        }
-
-        response = self.__post(TWITCH_API_BASE + "eventsub/subscriptions", data=sub_data)
+        response = self.__twitch.eventsub_add_subscription(condition, sub_type, version)
         result = response.json()
 
         error = result.get('error')
@@ -170,8 +160,8 @@ class TwitchEventsub:
 
     def _unsubscribe(self, subscription_id):
         self.__logger.debug(f"unsubscribing from sub id {subscription_id}")
+        result = self.__twitch.eventsub_delete_subscription(subscription_id)
 
-        result = self.__delete(TWITCH_API_BASE + "eventsub/subscriptions", params={'id': subscription_id})
         return result.status_code == 204
 
     async def _verify_signature(self, request: "web.Request") -> bool:
@@ -217,11 +207,7 @@ class TwitchEventsub:
         return web.Response(status=200)
 
     def unsubscribe_all(self):
-        res = self.__twitch.get_eventsub_subscriptions()
-        if res:
-            for sub in res.get('data', {}):
-                sub_id = sub.get('id')
-                self._unsubscribe(sub_id)
+        self.__twitch.delete_all_eventsub_subscriptions()
 
     def unsubscribe_all_listen(self):
         for sub_id, callback in self.__callbacks.items():
@@ -240,9 +226,10 @@ class TwitchEventsub:
 
     def listen_channel_follow(self, broadcaster_user_id, callback):
         condition = {
-            'broadcaster_user_id': broadcaster_user_id
+            'broadcaster_user_id': broadcaster_user_id,
+            'moderator_user_id': broadcaster_user_id
         }
-        return self._subscribe("channel.follow", condition, callback)
+        return self._subscribe("channel.follow", condition, callback, version=2)
 
     def listen_channel_ban(self, broadcaster_user_id, callback):
         condition = {

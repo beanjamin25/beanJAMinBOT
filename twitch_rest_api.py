@@ -1,6 +1,7 @@
-import datetime
 import secrets
 from pprint import pprint
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 import requests
 import yaml
@@ -228,10 +229,10 @@ class TwitchRestApi:
             return r.json()['data']
 
     def create_clip(self, channel_name):
-        self.validate_oauth_token(user=True)
+        self.validate_oauth_token()
         url = API_BASE + "clips"
         headers = {
-            "Authorization": "Bearer " + self.user_oauth,
+            "Authorization": "Bearer " + self.oauth_token,
             "Client-Id": self.client_id
         }
         channel_id = self.get_channel_id(channel_name)
@@ -262,12 +263,10 @@ class TwitchRestApi:
         }
 
         subscriptions = self.get_eventsub_subscriptions()
-        pprint(subscriptions)
         for sub in subscriptions.get('data', {}):
             sub_id = sub.get('id')
             if sub.get('status') != 'enabled':
                 r = requests.delete(del_url, headers=headers, params={"id": sub_id})
-                print(r.status_code, r.content)
 
     def eventsub_delete_subscription(self, subscription_id):
         self.validate_app_token()
@@ -278,9 +277,9 @@ class TwitchRestApi:
         }
 
         r = requests.delete(url, headers=headers, params={'id': subscription_id})
-        return
+        return r
 
-    def eventsub_add_subscription(self, channel_name, subscription_type):
+    def eventsub_add_subscription(self, condition):
         self.validate_app_token()
         url = API_BASE + "eventsub/subscriptions"
         headers = {
@@ -289,14 +288,19 @@ class TwitchRestApi:
             "Content-Type": "application/json"
         }
 
-        channel_id = self.get_channel_id(channel_name)
+    def eventsub_add_subscription(self, condition, subscription_type, version='1'):
+        self.validate_app_token()
+        url = API_BASE + "eventsub/subscriptions"
+        headers = {
+            "Authorization": "Bearer " + self.app_token,
+            "Client-ID": self.client_id,
+            "Content-Type": "application/json"
+        }
 
         payload = {
             "type": subscription_type,
-            "version": "1",
-            "condition": {
-                "broadcaster_user_id": channel_id
-            },
+            "version": version,
+            "condition": condition,
             "transport": {
                 "method": "webhook",
                 "callback": self.callback_uri,
@@ -304,8 +308,7 @@ class TwitchRestApi:
             }
         }
         r = requests.post(url, headers=headers, json=payload)
-        print(r.status_code)
-        pprint(r.json())
+        return r
 
     def get_subscribers(self, channel_name):
         self.validate_oauth_token(user=True)
@@ -320,8 +323,36 @@ class TwitchRestApi:
         r = requests.get(url, headers=headers, params={"broadcaster_id": channel_id})
         return r.json()
 
+    def get_followage(self, channel_name, follower_name) -> relativedelta:
+        self.validate_oauth_token()
+        url = API_BASE + "channels/followers"
+        headers = {
+            "Authorization": "Bearer " + self.oauth_token,
+            "Client-ID": self.client_id,
+            "Content-Type": "application/json"
+        }
+        channel_id = self.get_channel_id(channel_name)
+        follower_id = self.get_channel_id(follower_name)
+        if not follower_id:
+            return False
+
+        parameters = {
+            "broadcaster_id": channel_id,
+            "user_id": follower_id
+        }
+        r = requests.get(url, headers=headers, params=parameters).json()
+        if len(r['data']) == 0:
+            return False
+        followed_at = r['data'][0]['followed_at']
+
+        datetime_format = "%Y-%m-%dT%H:%M:%SZ"
+        followed_datetime = datetime.strptime(followed_at, datetime_format)
+        follow_age = relativedelta(datetime.now(), followed_datetime)
+        return follow_age
+
 
 if __name__ == "__main__":
     twitch_api = TwitchRestApi(auth_filename="config/botjamin_auth.yaml")
-    res = twitch_api.get_subscribers("beanjamin25")
+    res = twitch_api.get_followage("beanjamin25", "magicmoo_")
     pprint(res)
+    print(f"{res.months} month{'s' if res.months < 1 else ''}")
