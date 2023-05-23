@@ -122,7 +122,7 @@ class TwitchEvents:
                 self.obs_control.show_source("nooooo")
                 time.sleep(5)
 
-            elif reward_name == "pokeballs":
+            elif reward_name == "pokeballs" or reward_name == "first!":
                 print(event)
                 if self.poke_game is not None:
                     self.poke_game.add_pokeballs(user)

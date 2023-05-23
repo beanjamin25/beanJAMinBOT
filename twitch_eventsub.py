@@ -207,6 +207,7 @@ class TwitchEventsub:
         return web.Response(status=200)
 
     def unsubscribe_all(self):
+        print("unsubscribing all?")
         self.__twitch.delete_all_eventsub_subscriptions()
 
     def unsubscribe_all_listen(self):

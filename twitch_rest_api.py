@@ -263,10 +263,10 @@ class TwitchRestApi:
         }
 
         subscriptions = self.get_eventsub_subscriptions()
+        print(subscriptions)
         for sub in subscriptions.get('data', {}):
             sub_id = sub.get('id')
-            if sub.get('status') != 'enabled':
-                r = requests.delete(del_url, headers=headers, params={"id": sub_id})
+            requests.delete(del_url, headers=headers, params={"id": sub_id})
 
     def eventsub_delete_subscription(self, subscription_id):
         self.validate_app_token()
@@ -350,9 +350,23 @@ class TwitchRestApi:
         follow_age = relativedelta(datetime.now(), followed_datetime)
         return follow_age
 
+    def get_chatters(self, channel_name):
+        self.validate_oauth_token(user=True) # use broadcaster id
+        url = API_BASE + "chat/chatters"
+
+        headers = {
+            "Authorization": "Bearer " + self.user_oauth,
+            "Client-ID": self.client_id
+        }
+        channel_id = self.get_channel_id(channel_name)
+        parameters = {
+            "broadcaster_id": channel_id,
+            "moderator_id": channel_id
+        }
+        r = requests.get(url, headers=headers, params=parameters).json()
+        return r
 
 if __name__ == "__main__":
     twitch_api = TwitchRestApi(auth_filename="config/botjamin_auth.yaml")
-    res = twitch_api.get_followage("beanjamin25", "magicmoo_")
+    res = twitch_api.get_chatters("beanjamin25")
     pprint(res)
-    print(f"{res.months} month{'s' if res.months < 1 else ''}")

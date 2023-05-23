@@ -6,11 +6,12 @@ import json
 
 from collections import defaultdict
 
+from twitch_rest_api import TwitchRestApi
 
 
 class Watchtime(threading.Thread):
 
-    def __init__(self, channel, interval=5, db=None):
+    def __init__(self, channel, interval=5, db=None, twitch: TwitchRestApi=None):
         threading.Thread.__init__(self)
         self.daemon = True
         self.channel = channel
@@ -19,6 +20,7 @@ class Watchtime(threading.Thread):
         self.current_viewers = list()
         self.this_stream = set()
         self.db = db
+        self.twich = twitch
         self.stream_flag = False
 
         if self.db is not None:
@@ -35,16 +37,16 @@ class Watchtime(threading.Thread):
         start = time.time()
         while True:
             try:
-                r = requests.get("https://tmi.twitch.tv/group/user/" + self.channel + "/chatters").json()
+                r = self.twich.get_chatters(self.channel)
                 delta = time.time() - start
                 start = time.time()
-                chatters = r.get("chatters")
+                chatters = r.get("data", {})
                 self.current_viewers = list()
-                for viewers in chatters.values():
-                    for viewer in viewers:
-                        self.viewers[viewer] += delta
-                        self.current_viewers.append(viewer)
-                        self.this_stream.add(viewer)
+                for viewer in chatters:
+                    viewer_name = viewer.get("user_login")
+                    self.viewers[viewer_name] += delta
+                    self.current_viewers.append(viewer_name)
+                    self.this_stream.add(viewer_name)
                 if self.db is not None and self.stream_flag:
                     with open(self.db, 'w') as f:
                         json.dump(
@@ -55,7 +57,7 @@ class Watchtime(threading.Thread):
             except Exception as e:
                 print(e)
             finally:
-                print("current viewers", self.current_viewers)
+                print("current viewers", sorted(self.current_viewers))
                 time.sleep(self.interval)
 
 

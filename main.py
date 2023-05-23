@@ -88,7 +88,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             db = watchtime_config.get('db_file', None)
             if db is not None:
                 db = os.path.join(data_directory, db)
-            self.watchtime = Watchtime(channel=self.channel_name, interval=interval, db=db)
+            self.watchtime = Watchtime(channel=self.channel_name, interval=interval, db=db, twitch=self.twitch_api)
             self.watchtime.start()
 
         self.check_if_live_thread = Thread(target=self.check_if_live_target, args=(5,), daemon=True)
@@ -147,8 +147,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         c.cap('REQ', ':twitch.tv/commands')
         c.join(self.channel)
 
-        r = requests.get("https://tmi.twitch.tv/group/user/" + self.channel_name + "/chatters").json()
-        print(r)
 
     def on_pubmsg(self, c, e):
         print(e)
