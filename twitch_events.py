@@ -7,8 +7,6 @@ import time
 import simpleobsws
 from playsound import playsound
 
-import vlc
-
 from obs_control import ObsControl
 from tts import TalkBot
 from pokemon import PokemonChatGame
@@ -100,9 +98,7 @@ class TwitchEvents:
             if reward_sfx:
                 sfx_path = os.path.join(self.sfx_directory, reward_sfx)
                 print("playing this sound: " + sfx_path)
-                p = vlc.MediaPlayer(sfx_path)
-                p.play()
-                #playsound(sfx_path)
+                playsound(sfx_path)
                 print("played it")
 
             elif reward_name == "tts" and user_input is not None and self.talk_bot is not None:
