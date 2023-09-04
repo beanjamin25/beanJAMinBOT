@@ -279,15 +279,6 @@ class TwitchRestApi:
         r = requests.delete(url, headers=headers, params={'id': subscription_id})
         return r
 
-    def eventsub_add_subscription(self, condition):
-        self.validate_app_token()
-        url = API_BASE + "eventsub/subscriptions"
-        headers = {
-            "Authorization": "Bearer " + self.app_token,
-            "Client-ID": self.client_id,
-            "Content-Type": "application/json"
-        }
-
     def eventsub_add_subscription(self, condition, subscription_type, version='1'):
         self.validate_app_token()
         url = API_BASE + "eventsub/subscriptions"
@@ -305,6 +296,65 @@ class TwitchRestApi:
                 "method": "webhook",
                 "callback": self.callback_uri,
                 "secret": self.eventsub_secret
+            }
+        }
+        r = requests.post(url, headers=headers, json=payload)
+        return r
+
+    def get_eventsub_subscriptions_websocket(self):
+        self.validate_oauth_token(user=True)
+        headers = {
+            "Authorization": "Bearer " + self.user_oauth,
+            "Client-Id": self.client_id
+        }
+        url = API_BASE + "eventsub/subscriptions"
+        r = requests.get(url, headers=headers)
+        if r.status_code == 200:
+            return r.json()
+        return False
+
+    def delete_all_eventsub_subscriptions_websocket(self):
+        self.validate_oauth_token(user=True)
+        del_url = API_BASE + "eventsub/subscriptions"
+        headers = {
+            "Authorization": "Bearer " + self.user_oauth,
+            "Client-Id": self.client_id
+        }
+
+        subscriptions = self.get_eventsub_subscriptions_websocket()
+        print(subscriptions)
+        for sub in subscriptions.get('data', {}):
+            sub_id = sub.get('id')
+            requests.delete(del_url, headers=headers, params={"id": sub_id})
+
+
+    def eventsub_delete_subscription_websocket(self, subscription_id):
+        self.validate_oauth_token(user=True)
+        url = API_BASE + "eventsub/subscriptions"
+        headers = {
+            "Authorization": "Bearer " + self.user_oauth,
+            "Client-Id": self.client_id
+        }
+
+        r = requests.delete(url, headers=headers, params={'id': subscription_id})
+        return r
+
+    def eventsub_add_subscription_websocket(self, condition, subscription_type, session_id, version='1'):
+        self.validate_oauth_token(user=True)
+        url = API_BASE + "eventsub/subscriptions"
+        headers = {
+            "Authorization": "Bearer " + self.user_oauth,
+            "Client-ID": self.client_id,
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "type": subscription_type,
+            "version": version,
+            "condition": condition,
+            "transport": {
+                "method": "websocket",
+                "session_id": session_id
             }
         }
         r = requests.post(url, headers=headers, json=payload)

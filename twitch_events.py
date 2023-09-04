@@ -11,6 +11,7 @@ from obs_control import ObsControl
 from tts import TalkBot
 from pokemon import PokemonChatGame
 from twitch_eventsub import TwitchEventsub
+from twitch_eventsub_websocket import TwitchEventsubWebsocket
 from twitch_rest_api import TwitchRestApi
 
 URL = "127.0.0.1"
@@ -48,17 +49,13 @@ class TwitchEvents:
 
         self.obs_control = obs_control
 
-        self.eventsub = TwitchEventsub(port=8008,
-                                       twitch=twitch_api,
-                                       log_level=logging.DEBUG)
-
+        self.eventsub = TwitchEventsubWebsocket(twitch_api, log_level=logging.INFO)
         user_id = twitch_api.get_channel_id(channel.strip("#"))
-        self.eventsub.start()
-        self.eventsub.unsubscribe_all()
         self.eventsub.listen_channel_follow(user_id, self.on_follow)
         self.eventsub.listen_channel_raid(user_id, self.on_raid)
         self.eventsub.listen_channel_points_redeem(user_id, self.on_points)
         self.eventsub.listen_channel_subscription_message(user_id, self.on_sub_message)
+        self.eventsub.start()
 
         threading.Thread(target=self.points_worker, daemon=True).start()
 
