@@ -83,7 +83,7 @@ class TwitchRestApi:
         url = AUTH_API_BASE + "validate"
         headers = {"Authorization": "Bearer " + token}
         response = requests.get(url, headers=headers)
-        if response != 200:
+        if response.status_code != 200:
             self.refresh_oauth_token(user=user)
             return False
         return True
