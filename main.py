@@ -19,6 +19,10 @@ from tts import TalkBot
 from pokemon import PokemonChatGame
 from schedule import Schedule
 from twitch_events import TwitchEvents
+from exceptions import TwitchResourceNotFoundError, TwitchAPIError
+from logging_config import setup_logging, get_logger
+
+logger = get_logger('main')
 
 
 CHANNEL_NAME = "channel_name"
@@ -49,7 +53,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             self.bot_name = properties[BOT_NAME]
             self.channel = '#' + self.channel_name
         except KeyError as e:
-            print("Missing a property in the config file", e)
+            logger.error(f"Missing a property in the config file: {e}")
             exit(1)
 
         self.twitch_api.validate_oauth_token()
@@ -135,9 +139,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             self.sfx_queue = self.twitch_eventsub.points_queue
 
     def on_welcome(self, c, e):
-        print("Welcome!")
-        print(e)
-        print("Joining channel: " + self.channel + "...")
+        logger.info("Welcome!")
+        logger.debug(e)
+        logger.info(f"Joining channel: {self.channel}...")
         c.cap('REQ', ':twitch.tv/membership')
         c.cap('REQ', ':twitch.tv/tags')
         c.cap('REQ', ':twitch.tv/commands')
@@ -145,11 +149,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
 
     def on_pubmsg(self, c, e):
-        print(e)
+        logger.debug(e)
         user_msg = e.arguments[0]
         user = self.get_username(e)
         if not user_msg.startswith("!"):
-            print(user, "said", '"' + user_msg + '"')
+            logger.debug(f'{user} said "{user_msg}"')
             return
         parsed_cmd = user_msg.split(" ")
         cmd = parsed_cmd[0].replace('!', '')
@@ -184,16 +188,19 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def check_if_live_target(self, interval=5):
         while True:
-            stream_info = self.twitch_api.get_stream_info(self.channel_name)
-            is_live = stream_info is not False
-            if not self.watchtime.stream_flag and is_live:
-                print(self.channel_name + " has gone LIVE!!! LETS GOOO!!!!!")
-                self.clip_bot.init_clips_for_stream(started_at=stream_info.get("started_at"))
-                self.watchtime.stream_flag = True
-            elif self.watchtime.stream_flag and not is_live:
-                print(self.channel_name + " has ended the stream!")
-                self.clip_bot.reset_clips_for_stream()
-                self.watchtime.stream_flag = False
+            try:
+                stream_info = self.twitch_api.get_stream_info(self.channel_name)
+                is_live = stream_info is not None
+                if not self.watchtime.stream_flag and is_live:
+                    logger.info(f"{self.channel_name} has gone LIVE!!! LETS GOOO!!!!!")
+                    self.clip_bot.init_clips_for_stream(started_at=stream_info.get("started_at"))
+                    self.watchtime.stream_flag = True
+                elif self.watchtime.stream_flag and not is_live:
+                    logger.info(f"{self.channel_name} has ended the stream!")
+                    self.clip_bot.reset_clips_for_stream()
+                    self.watchtime.stream_flag = False
+            except TwitchAPIError as e:
+                logger.warning(f"Failed to check stream status: {e}")
             time.sleep(interval)
 
     def check_permissions(self, cmd, user, user_has_mod, is_vip):
@@ -210,9 +217,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         c = self.connection
 
         user_has_mod = self.is_mod(e) or user == self.channel_name
-        print('received command: {cmd} with args: {args} from user: {user}({is_mod})'.format(
-            cmd=cmd, args=args, user=user, is_mod=user_has_mod
-        ))
+        logger.debug(f'received command: {cmd} with args: {args} from user: {user}({user_has_mod})')
 
         is_bits = self.is_bits(e)
 
@@ -239,7 +244,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                     clip_url = clip['edit_url'].split("/edit")[0]
                     c.privmsg(self.channel, clip_url)
             else:
-                print(res.content)
+                logger.warning(f"Failed to create clip: {res.content}")
 
         elif cmd in ('commands', 'addcommand', 'updatecommand', 'removecommand') and (user_has_mod or is_vip):
             if cmd == "commands":
@@ -333,10 +338,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 c.privmsg(self.channel, "You didn't give a quote, silly!")
                 return
             quote = " ".join(args)
-            channel_id = self.twitch_api.get_channel_id(self.channel_name)
-            if not channel_id:
-                return ""
-            game = self.twitch_api.get_last_game_played(channel_id)
+            try:
+                channel_id = self.twitch_api.get_channel_id(self.channel_name)
+                game = self.twitch_api.get_last_game_played(channel_id)
+            except TwitchResourceNotFoundError:
+                logger.warning(f"Could not get channel info for quote")
+                return
             now_str = datetime.datetime.now().strftime("[%m/%d/%Y %H:%M:%S]")
             final_quote = f"{quote} [{game}] {now_str}"
             self.quotes.append(final_quote)
@@ -371,8 +378,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             c.privmsg(self.channel, msg)
 
         elif cmd == 'followage':
-            follow_age = self.twitch_api.get_followage(self.channel_name, user)
-            if not follow_age:
+            try:
+                follow_age = self.twitch_api.get_followage(self.channel_name, user)
+            except TwitchResourceNotFoundError:
                 c.privmsg(self.channel, f"Silly {user}, you don't even follow {self.channel_name} yet! Go and give them a follow right now :-o")
                 return
             msg = f"{user}, you have been following for "
@@ -426,21 +434,24 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def shoutout(self, twitch_channel):
         shoutout_msg = "Go checkout {user} at twitch.tv/{user}! They were last playing {game}!"
-        channel_id = self.twitch_api.get_channel_id(twitch_channel)
-        if not channel_id:
-            return ""
-        last_game = self.twitch_api.get_last_game_played(channel_id)
+        try:
+            channel_id = self.twitch_api.get_channel_id(twitch_channel)
+            last_game = self.twitch_api.get_last_game_played(channel_id)
+        except TwitchResourceNotFoundError:
+            logger.warning(f"Could not get channel info for shoutout: {twitch_channel}")
+            return f"Go checkout {twitch_channel} at twitch.tv/{twitch_channel}!"
         return shoutout_msg.format(user=twitch_channel, game=last_game)
 
 
 if __name__ == '__main__':
-    print("Starting Bot...")
+    setup_logging(log_level=logging.INFO)
+    logger.info("Starting Bot...")
     properties = yaml.safe_load(open("config/bot.conf"))
-    print(properties)
+    logger.debug(properties)
     bot = TwitchBot(properties)
 
     try:
         bot.start()
     except KeyboardInterrupt:
         bot.twitch_eventsub.eventsub.stop()
-        print("viewers this stream [%s]" % ", ".join(bot.watchtime.this_stream))
+        logger.info("viewers this stream [%s]" % ", ".join(bot.watchtime.this_stream))

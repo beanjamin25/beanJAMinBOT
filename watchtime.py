@@ -7,6 +7,10 @@ import json
 from collections import defaultdict
 
 from twitch_rest_api import TwitchRestApi
+from exceptions import TwitchAPIError
+from logging_config import get_logger
+
+logger = get_logger('watchtime')
 
 
 class Watchtime(threading.Thread):
@@ -54,10 +58,12 @@ class Watchtime(threading.Thread):
                             f,
                             indent=4
                         )
+            except TwitchAPIError as e:
+                logger.warning(f"Failed to fetch chatters: {e}")
             except Exception as e:
-                print(e)
+                logger.exception("Unexpected error in watchtime loop")
             finally:
-                print("current viewers", sorted(self.current_viewers))
+                logger.debug(f"current viewers: {sorted(self.current_viewers)}")
                 time.sleep(self.interval)
 
 

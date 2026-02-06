@@ -3,6 +3,10 @@ import threading
 import time
 
 from twitch_rest_api import TwitchRestApi
+from exceptions import TwitchAPIError
+from logging_config import get_logger
+
+logger = get_logger('clips')
 
 
 class Clips(threading.Thread):
@@ -23,7 +27,7 @@ class Clips(threading.Thread):
     def init_clips_for_stream(self, started_at):
         self.stream_started_at = started_at
         self.clips_this_stream = set(clip['id'] for clip in self.twitch.get_clips(self.channel_name, started_at=started_at))
-        print(self.clips_this_stream)
+        logger.info(f"Initialized clips for stream: {self.clips_this_stream}")
 
     def reset_clips_for_stream(self):
         self.clips_this_stream = None
@@ -44,8 +48,10 @@ class Clips(threading.Thread):
                         self.connection.privmsg(self.channel, clip_url)
                         self.clips_this_stream.add(clip['id'])
 
+            except TwitchAPIError as e:
+                logger.warning(f"Failed to fetch clips: {e}")
             except Exception as e:
-                print("error:", e)
+                logger.exception("Unexpected error in clips loop")
             finally:
                 time.sleep(1)
 

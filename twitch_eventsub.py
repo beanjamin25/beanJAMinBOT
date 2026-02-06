@@ -95,7 +95,8 @@ class TwitchEventsubWebsocket:
                 self.__logger.debug('WebSocket closed. Code: {} | Reason: {}'.format(
                     self.ws.close_code, self.ws.close_reason))
                 return
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                self.__logger.warning(f"Failed to parse WebSocket message: {e}")
                 continue
 
     async def _handle_reconnect(self, payload):
