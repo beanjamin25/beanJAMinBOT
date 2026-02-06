@@ -1,17 +1,13 @@
-import csv
 import datetime
 import logging
 import os
 import random
 import time
-from pprint import pprint
 
-import simpleobsws
 from dateutil.parser import isoparse
 from threading import Thread
 
 import irc.bot
-import requests
 import yaml
 
 from clips import Clips

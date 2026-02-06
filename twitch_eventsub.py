@@ -1,263 +1,219 @@
-import hashlib
-import hmac
+import json
 import logging
-import random
-import string
 import sys
-import time
-from concurrent.futures._base import CancelledError
-
-import requests
-
-from aiohttp import web
-
-import threading
 import asyncio
+import threading
 
-from logging import getLogger, Logger
-from twitch_rest_api import TwitchRestApi, API_BASE as TWITCH_API_BASE
+import websockets
+
+from twitch_rest_api import TwitchRestApi
+
+DEFAULT_URL = "wss://eventsub.wss.twitch.tv/ws"
+RECONNECT_BACKOFF_BASE = 1
+RECONNECT_BACKOFF_MAX = 120
 
 
-class TwitchEventsub:
-
-    secret = "".join(random.choice(string.ascii_lowercase) for i in range(20))
-    callback_url = None
-    wait_for_subscription_confirm: bool = True
-    wait_for_subscription_confirm_timeout: int = 30
-    unsubscribe_on_stop: bool = True
-
-    _port: int = 88
-    _host: str = '0.0.0.0'
-
-    __loop = None
-    __runner = None
-    __thread = None
-    _running = False
-
-    __logger = None
-
-    __twitch: TwitchRestApi = None
-    __client_id: str = None
-
-    __callbacks = {}
-    __active_subs = {}
+class TwitchEventsubWebsocket:
 
     def __init__(self,
-                 port: int,
                  twitch: TwitchRestApi,
+                 url=DEFAULT_URL,
                  log_level=logging.ERROR):
+        self.url = url
+        self._connect_url = url
 
-        self._port = port
         self.__twitch = twitch
-        self.callback_url = self.__twitch.callback_uri
-        self.secret = self.__twitch.eventsub_secret
+        self.__stopping = False
+        self._keepalive_timeout = None
+
+        self.subscription_list = []
+        self.callbacks = {}
 
         formatter = logging.Formatter("[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s")
-
-        self.__logger = getLogger("TwitchEventsub")
+        self.__logger = logging.getLogger(__name__)
         self.__logger.setLevel(log_level)
         local_handler = logging.StreamHandler(stream=sys.stdout)
         local_handler.setFormatter(formatter)
         self.__logger.addHandler(local_handler)
 
-        aio_logger = getLogger("aiohttp.access")
-        aio_logger.setLevel(log_level)
-        aio_handler = logging.StreamHandler(stream=sys.stdout)
-        aio_handler.setFormatter(formatter)
-        aio_logger.addHandler(aio_handler)
-
-    def __build_runner(self):
-        app = web.Application()
-        app.add_routes([web.post("/callback", self.__handle_callback),
-                        web.get("/", self.__handle_default)])
-
-        return web.AppRunner(app)
-
-    def __run_hook(self, runner: 'web.AppRunner'):
-        self.__runner = runner
+    def __run_hook(self):
+        self.__logger.debug("starting")
         self.__loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.__loop)
-        self.__loop.run_until_complete(runner.setup())
-        site = web.TCPSite(runner, str(self._host), self._port)
-        self.__loop.run_until_complete(site.start())
-        self.__logger.info(f"started Eventsub listener on port {self._port}")
-        try:
-            self.__loop.run_forever()
-        except (CancelledError, asyncio.CancelledError):
-            self.__logger.debug('cancel culture run amok')
+        self.__loop.run_until_complete(self.__run_with_reconnect())
 
-    def start(self):
-        if self._running:
-            raise RuntimeError("already running")
+    async def __run_with_reconnect(self):
+        backoff = RECONNECT_BACKOFF_BASE
+        while not self.__stopping:
+            try:
+                await self.__connect()
+                await self._ws_recv_task()
+            except Exception as e:
+                self.__logger.error(f"WebSocket error: {e}")
 
-        self.__thread = threading.Thread(target=self.__run_hook, args=(self.__build_runner(),), daemon=True)
-        self._running = True
-        self.__thread.start()
+            if self.__stopping:
+                break
 
-    def stop(self):
-        if self.__runner is not None and self.unsubscribe_on_stop:
-            self.__logger.info("would delete all subs if we are live")
-            self.unsubscribe_all_listen()
+            self.__logger.info(f"reconnecting in {backoff}s...")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, RECONNECT_BACKOFF_MAX)
+            self._connect_url = self.url
 
-        tasks = {t for t in asyncio.all_tasks(loop=self.__loop) if not t.done()}
-        for task in tasks:
-            task.cancel()
+    async def __connect(self):
+        self.__logger.debug(f"connecting to {self._connect_url}")
+        self.ws = await websockets.connect(self._connect_url)
+        self.__logger.debug("connected")
 
-        self.__loop.call_soon_threadsafe(self.__loop.stop)
-        self.__runner = None
-        self._running = False
+    async def _ws_recv_task(self):
+        while self.ws.open:
+            try:
+                timeout = self._keepalive_timeout + 5 if self._keepalive_timeout else None
+                message = await asyncio.wait_for(self.ws.recv(), timeout=timeout)
+                if not message:
+                    continue
+                incoming_payload = json.loads(message)
+                metadata = incoming_payload.get("metadata")
+                payload = incoming_payload.get("payload")
+                message_type = metadata.get("message_type")
+                if message_type == "session_welcome":
+                    await self.on_welcome(payload)
+                elif message_type == "session_keepalive":
+                    continue
+                elif message_type == "session_reconnect":
+                    await self._handle_reconnect(payload)
+                    return
+                elif message_type == "notification":
+                    await self.handle_callback(payload)
+                self.__logger.debug(json.dumps(incoming_payload, indent=2))
+            except asyncio.TimeoutError:
+                self.__logger.warning("keepalive timeout — connection is dead, reconnecting")
+                await self.ws.close()
+                return
+            except (websockets.exceptions.ConnectionClosed,
+                    websockets.exceptions.ConnectionClosedError,
+                    websockets.exceptions.ConnectionClosedOK):
+                self.__logger.debug('WebSocket closed. Code: {} | Reason: {}'.format(
+                    self.ws.close_code, self.ws.close_reason))
+                return
+            except json.JSONDecodeError:
+                continue
 
-    ########## HELPERS ####################################
+    async def _handle_reconnect(self, payload):
+        session = payload.get("session", {})
+        reconnect_url = session.get("reconnect_url")
+        self.__logger.info(f"received session_reconnect, new url: {reconnect_url}")
+        old_ws = self.ws
+        self._connect_url = reconnect_url
+        await self.__connect()
+        # Wait for welcome on new connection, then close old one
+        message = await self.ws.recv()
+        incoming_payload = json.loads(message)
+        metadata = incoming_payload.get("metadata")
+        payload = incoming_payload.get("payload")
+        if metadata.get("message_type") == "session_welcome":
+            await self.on_welcome(payload)
+        await old_ws.close()
+        # Continue receiving on the new connection
+        await self._ws_recv_task()
 
-    def __request_headers(self):
-        token = self.__twitch.get_app_token()
-        return {
-            'Client-ID': self.__twitch.client_id,
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {token}'
-        }
-
-    def __post(self, url, data=None):
-        headers = self.__request_headers()
-        return requests.post(url, headers=headers, json=data)
-
-    def __get(self, url, params=None):
-        headers = self.__request_headers()
-        return requests.get(url, headers=headers, params=params)
-
-    def __delete(self, url, params=None):
-        headers = self.__request_headers()
-        return requests.delete(url, headers=headers, params=params)
-
-    def __add_callback(self, callback_id, callback):
-        self.__callbacks[callback_id] = {'id': callback_id, 'callback': callback, 'active': False}
-
-    def __enable_callback(self, callback_id):
-        self.__callbacks[callback_id]['active'] = True
-
-    def _subscribe(self, sub_type, condition, callback, version='1'):
-        self.__logger.debug(f"subscribe to {sub_type} with condtion {condition}")
-
-        response = self.__twitch.eventsub_add_subscription(condition, sub_type, version)
-        result = response.json()
-
-        error = result.get('error')
-        if error is not None:
-            self.__logger.error(result)
-            return
-
-        subscription_id = result['data'][0]['id']
-        self.__add_callback(subscription_id, callback)
-
-        timeout = 0
-        while timeout < 30:
-            if self.__callbacks[subscription_id]['active']:
-                return subscription_id
-            time.sleep(0.01)
-            timeout += 0.01
-        self.__callbacks.pop(subscription_id, None)
-        raise Exception(f"Failed to subscribe to {sub_type}")
-
-    def _unsubscribe(self, subscription_id):
-        self.__logger.debug(f"unsubscribing from sub id {subscription_id}")
-        result = self.__twitch.eventsub_delete_subscription(subscription_id)
-
-        return result.status_code == 204
-
-    async def _verify_signature(self, request: "web.Request") -> bool:
-        message_id = request.headers['Twitch-Eventsub-Message-Id']
-        message_timestamp = request.headers['Twitch-Eventsub-Message-Timestamp']
-        hmac_message = message_id + message_timestamp + await request.text()
-        digester = hmac.new(bytes(self.secret, 'utf-8'), bytes(hmac_message, 'utf-8'), hashlib.sha256)
-        calculated_signature = digester.hexdigest()
-        provided_signature = request.headers['Twitch-Eventsub-Message-Signature'].split("sha256=")[1]
-
-        return calculated_signature == provided_signature
-
-    ########## HANDLERS ###################################
-
-    async def __handle_default(self, request: 'web.Request'):
-        self.__logger.info("hit default")
-        return web.Response(text="hello there!")
-
-    async def __handle_challenge(self, request: 'web.Request', data):
-        self.__logger.debug(f'challenge for subscription {data.get("subscription").get("id")}')
-        if not await self._verify_signature(request):
-            return web.Response(status=403)
-
-        self.__enable_callback(data.get("subscription").get("id"))
-        return web.Response(text=data.get("challenge"))
-
-    async def __handle_callback(self, request: 'web.Request'):
-        data: dict = await request.json()
-        if data.get("challenge") is not None:
-            return await self.__handle_challenge(request, data)
-
-        if not await self._verify_signature(request):
-            self.__logger.warning(f'mismatched signature!')
-            return web.Response(status=403)
-
-        subscription_id = data.get("subscription", {}).get("id")
-        callback = self.__callbacks.get(subscription_id)
+    async def handle_callback(self, payload):
+        self.__logger.debug("handling callback!")
+        subscription_id = payload.get("subscription", {}).get("id")
+        callback = self.callbacks.get(subscription_id)
         if callback is None:
             self.__logger.error(f"event received for unknown sub with ID {subscription_id}")
         else:
-            self.__loop.create_task(callback['callback'](data))
+            await callback(payload)
 
-        return web.Response(status=200)
+    async def on_welcome(self, payload):
+        self.__logger.info("on welcome")
+        session = payload["session"]
+        self.session_id = session.get('id')
+        self._keepalive_timeout = session.get('keepalive_timeout_seconds', 10)
+        self.__twitch.delete_all_eventsub_subscriptions()
+        self.callbacks.clear()
+        for (sub_type, condition, callback, version) in self.subscription_list:
+            response = self.__twitch.eventsub_add_subscription(
+                condition,
+                sub_type,
+                self.session_id,
+                version
+            )
+            result = response.json()
+            error = result.get("error")
+            if error is not None:
+                self.__logger.error(f"error for sub {sub_type}: {result}")
+                self.__logger.debug(response.request.body)
+                continue
 
-    def unsubscribe_all(self):
-        print("unsubscribing all?")
+            subscription_id = result['data'][0]['id']
+            self.callbacks[subscription_id] = callback
+
+        response = self.__twitch.get_eventsub_subscriptions()
+        self.__logger.debug(json.dumps(response, indent=2))
+        self.__logger.debug(self.callbacks)
+        self.__logger.info("websockets listening")
+
+    def start(self):
+        self.__stopping = False
+        self.__thread = threading.Thread(target=self.__run_hook, daemon=True)
+        self.__thread.start()
+
+    def stop(self):
+        self.__stopping = True
         self.__twitch.delete_all_eventsub_subscriptions()
 
-    def unsubscribe_all_listen(self):
-        for sub_id, callback in self.__callbacks.items():
-            self.__logger.debug(f"unsubscribing from event {sub_id}")
-            res = self._unsubscribe(sub_id)
-            if not res:
-                self.__logger.warning(f"failed to unsubscribe from {sub_id}")
-        self.__callbacks.clear()
+        if hasattr(self, '_TwitchEventsubWebsocket__loop'):
+            tasks = {t for t in asyncio.all_tasks(loop=self.__loop) if not t.done()}
+            for task in tasks:
+                task.cancel()
+            self.__loop.call_soon_threadsafe(self.__loop.stop)
 
-    def unsubscrube_topic(self, topic_id):
-        res = self._unsubscribe(topic_id)
-        if res:
-            self.__callbacks.pop(topic_id, None)
-        else:
-            self.__logger.warning(f"failed to unsubscribe from {topic_id}")
+    def _subscribe(self, sub_type, condition, callback, version='1'):
+        self.__logger.debug(f"subbing to {sub_type}")
+        self.subscription_list.append((sub_type, condition, callback, version))
 
     def listen_channel_follow(self, broadcaster_user_id, callback):
         condition = {
             'broadcaster_user_id': broadcaster_user_id,
             'moderator_user_id': broadcaster_user_id
         }
-        return self._subscribe("channel.follow", condition, callback, version=2)
+        self._subscribe("channel.follow", condition, callback, version='2')
 
     def listen_channel_ban(self, broadcaster_user_id, callback):
         condition = {
             'broadcaster_user_id': broadcaster_user_id
         }
-        return self._subscribe('channel.ban', condition, callback)
+        self._subscribe('channel.ban', condition, callback)
 
     def listen_channel_unban(self, broadcaster_user_id, callback):
         condition = {
             'broadcaster_user_id': broadcaster_user_id
         }
-        return self._subscribe('channel.unban', condition, callback)
+        self._subscribe('channel.unban', condition, callback)
 
     def listen_channel_raid(self, broadcaster_user_id, callback):
         condition = {
             'to_broadcaster_user_id': broadcaster_user_id
         }
-        return self._subscribe('channel.raid', condition, callback)
+        self._subscribe('channel.raid', condition, callback)
 
     def listen_channel_points_redeem(self, broadcaster_user_id, callback):
         condition = {
             'broadcaster_user_id': broadcaster_user_id
         }
-        return self._subscribe('channel.channel_points_custom_reward_redemption.add', condition, callback)
+        self._subscribe('channel.channel_points_custom_reward_redemption.add', condition, callback)
 
     def listen_channel_subscription_message(self, broadcaster_user_id, callback):
         condition = {
             'broadcaster_user_id': broadcaster_user_id
         }
-        return self._subscribe('channel.subscription.message', condition, callback)
+        self._subscribe('channel.subscription.message', condition, callback)
+
+
+if __name__ == "__main__":
+    twitch = TwitchRestApi(auth_filename="config/botjamin_auth.yaml")
+    bean = twitch.get_channel_id("beanjamin25")
+    eventsub_websockets = TwitchEventsubWebsocket(twitch, log_level=logging.DEBUG)
+    eventsub_websockets.listen_channel_follow(bean, "hello")
+    eventsub_websockets.start()

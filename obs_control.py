@@ -139,7 +139,7 @@ class ObsControl:
         self.__logger.debug(eventData)
         full_path = eventData.get("savedReplayPath")
         dir = os.path.dirname(full_path)
-        filename = full_path.strip(dir)
+        filename = os.path.basename(full_path)
         for replay in os.listdir(dir):
             if replay.startswith("Replay") and replay != filename:
                 os.remove(os.path.join(dir, replay))

@@ -1,4 +1,3 @@
-import secrets
 from pprint import pprint
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -11,14 +10,12 @@ TWTICH = "twitch"
 CLIENT_ID = "client_id"
 CLIENT_SECRET = "client_secret"
 REDIRECT_URI = "oauth_redirect_uri"
-CALLBACK_URI = "eventsub_callback_uri"
 OAUTH_TOKEN = "oauth_token"
 REFRESH_TOKEN = "refresh_token"
 USER_OAUTH = "user_oauth"
 USER_REFRESH = "user_refresh"
 APP_TOKEN = "app_token"
 SCOPES = "scopes"
-EVENTSUB_SECRET = "eventsub_secret"
 
 API_BASE = "https://api.twitch.tv/helix/"
 
@@ -34,7 +31,6 @@ class TwitchRestApi:
         self.client_id = self.props[CLIENT_ID]
         self.client_secret = self.props[CLIENT_SECRET]
         self.redirect_uri = self.props[REDIRECT_URI]
-        self.callback_uri = self.props[CALLBACK_URI]
 
         self.oauth_token = self.props.get(OAUTH_TOKEN, "")
         self.refresh_token = self.props.get(REFRESH_TOKEN, "")
@@ -45,15 +41,6 @@ class TwitchRestApi:
         self.app_token = self.props.get(APP_TOKEN, "")
 
         self.scopes = self.props.get(SCOPES, [])
-
-        self.eventsub_secret = self.props.get(EVENTSUB_SECRET, "")
-        if not self.eventsub_secret:
-            self.eventsub_secret = secrets.token_urlsafe()
-            self.props[EVENTSUB_SECRET] = self.eventsub_secret
-            self.auth_props[TWTICH] = self.props
-            with open(self.auth_filename, 'w') as f:
-                yaml.dump(self.auth_props, f)
-
 
     def oauth_request_url(self):
         url = AUTH_API_BASE + "authorize"
@@ -96,7 +83,7 @@ class TwitchRestApi:
         url = AUTH_API_BASE + "validate"
         headers = {"Authorization": "Bearer " + token}
         response = requests.get(url, headers=headers)
-        if response != 200:
+        if response.status_code != 200:
             self.refresh_oauth_token(user=user)
             return False
         return True
@@ -243,9 +230,9 @@ class TwitchRestApi:
         return r
 
     def get_eventsub_subscriptions(self):
-        self.validate_app_token()
+        self.validate_oauth_token(user=True)
         headers = {
-            "Authorization": "Bearer " + self.app_token,
+            "Authorization": "Bearer " + self.user_oauth,
             "Client-Id": self.client_id
         }
         url = API_BASE + "eventsub/subscriptions"
@@ -255,10 +242,10 @@ class TwitchRestApi:
         return False
 
     def delete_all_eventsub_subscriptions(self):
-        self.validate_app_token()
+        self.validate_oauth_token(user=True)
         del_url = API_BASE + "eventsub/subscriptions"
         headers = {
-            "Authorization": "Bearer " + self.app_token,
+            "Authorization": "Bearer " + self.user_oauth,
             "Client-Id": self.client_id
         }
 
@@ -269,30 +256,21 @@ class TwitchRestApi:
             requests.delete(del_url, headers=headers, params={"id": sub_id})
 
     def eventsub_delete_subscription(self, subscription_id):
-        self.validate_app_token()
+        self.validate_oauth_token(user=True)
         url = API_BASE + "eventsub/subscriptions"
         headers = {
-            "Authorization": "Bearer " + self.app_token,
+            "Authorization": "Bearer " + self.user_oauth,
             "Client-Id": self.client_id
         }
 
         r = requests.delete(url, headers=headers, params={'id': subscription_id})
         return r
 
-    def eventsub_add_subscription(self, condition):
-        self.validate_app_token()
+    def eventsub_add_subscription(self, condition, subscription_type, session_id, version='1'):
+        self.validate_oauth_token(user=True)
         url = API_BASE + "eventsub/subscriptions"
         headers = {
-            "Authorization": "Bearer " + self.app_token,
-            "Client-ID": self.client_id,
-            "Content-Type": "application/json"
-        }
-
-    def eventsub_add_subscription(self, condition, subscription_type, version='1'):
-        self.validate_app_token()
-        url = API_BASE + "eventsub/subscriptions"
-        headers = {
-            "Authorization": "Bearer " + self.app_token,
+            "Authorization": "Bearer " + self.user_oauth,
             "Client-ID": self.client_id,
             "Content-Type": "application/json"
         }
@@ -302,9 +280,8 @@ class TwitchRestApi:
             "version": version,
             "condition": condition,
             "transport": {
-                "method": "webhook",
-                "callback": self.callback_uri,
-                "secret": self.eventsub_secret
+                "method": "websocket",
+                "session_id": session_id
             }
         }
         r = requests.post(url, headers=headers, json=payload)
