@@ -153,7 +153,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         user_msg = e.arguments[0]
         user = self.get_username(e)
         if not user_msg.startswith("!"):
-            logger.debug(f'{user} said "{user_msg}"')
+            logger.info(f'{user} said "{user_msg}"')
             return
         parsed_cmd = user_msg.split(" ")
         cmd = parsed_cmd[0].replace('!', '')
@@ -217,7 +217,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         c = self.connection
 
         user_has_mod = self.is_mod(e) or user == self.channel_name
-        logger.debug(f'received command: {cmd} with args: {args} from user: {user}({user_has_mod})')
+        logger.info(f'received command: {cmd} with args: {args} from user: {user}({user_has_mod})')
 
         is_bits = self.is_bits(e)
 
