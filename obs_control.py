@@ -1,13 +1,12 @@
 import os
-import sys
 import threading
 import time
 
 import simpleobsws
 import asyncio
-import logging
 
 from exceptions import OBSSceneItemNotFoundError
+from logging_config import get_logger
 
 
 class ObsControl:
@@ -21,23 +20,12 @@ class ObsControl:
 
     shown_media = set()
 
-    def __init__(self, url='ws://localhost:4444', password='', log_level=logging.ERROR):
+    def __init__(self, url='ws://localhost:4444', password=''):
 
         self.url = url
         self.password = password
 
-        formatter = logging.Formatter("[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s")
-        self.__logger = logging.getLogger(__name__)
-        self.__logger.setLevel(log_level)
-        local_handler = logging.StreamHandler(stream=sys.stdout)
-        local_handler.setFormatter(formatter)
-        self.__logger.addHandler(local_handler)
-
-        # obs_log = logging.getLogger('simpleobsws')
-        # obs_log.setLevel(log_level)
-        # obs_handler = logging.StreamHandler(stream=sys.stdout)
-        # obs_handler.setFormatter(formatter)
-        # obs_log.addHandler(obs_handler)
+        self.__logger = get_logger('obs_control')
 
     def __run_hook(self):
         self.__logger.debug("starting")
@@ -53,7 +41,7 @@ class ObsControl:
             self.__loop.run_forever()
         except asyncio.CancelledError:
             self.__logger.info("OBS event loop cancelled")
-        except Exception as e:
+        except Exception:
             self.__logger.exception("Unexpected error in OBS event loop")
 
     def start(self):
@@ -94,12 +82,12 @@ class ObsControl:
 
     def show_source(self, source_name):
         try:
-            sourceId = asyncio.run_coroutine_threadsafe(self.getSceneItemId("Main Scene", source_name), self.__loop).result()
+            source_id = asyncio.run_coroutine_threadsafe(self.get_scene_item_id("Main Scene", source_name), self.__loop).result()
         except OBSSceneItemNotFoundError:
             self.__logger.warning(f"Cannot show source {source_name}: not found")
             return
-        self.__logger.debug(f"sourceId: {sourceId}")
-        asyncio.run_coroutine_threadsafe(self.show_media(sourceId), self.__loop)
+        self.__logger.debug(f"sourceId: {source_id}")
+        asyncio.run_coroutine_threadsafe(self.show_media(source_id), self.__loop)
 
     def register_callback(self, callback, event):
         self.ws.register_event_callback(callback, event)
@@ -113,22 +101,22 @@ class ObsControl:
                 self.__logger.error("OBS is not on, trying again in 5 secs...")
                 await asyncio.sleep(5)
 
-    async def getSceneItemId(self, sceneName, sourceName):
+    async def get_scene_item_id(self, scene_name, source_name):
         """Get scene item ID. Raises OBSSceneItemNotFoundError if not found."""
         request = simpleobsws.Request("GetSceneItemId", {
-            "sceneName": sceneName,
-            "sourceName": sourceName
+            "sceneName": scene_name,
+            "sourceName": source_name
         })
         ret = await self.ws.call(request)
         if ret.ok():
             return int(ret.responseData.get("sceneItemId"))
-        self.__logger.warning(f"Scene item not found: {sourceName} in {sceneName}")
-        raise OBSSceneItemNotFoundError(sceneName, sourceName)
+        self.__logger.warning(f"Scene item not found: {source_name} in {scene_name}")
+        raise OBSSceneItemNotFoundError(scene_name, source_name)
 
-    async def hide_finished_media(self, eventData):
-        input_name = eventData.get("inputName")
+    async def hide_finished_media(self, event_data):
+        input_name = event_data.get("inputName")
         try:
-            input_id = await self.getSceneItemId("Main Scene", input_name)
+            input_id = await self.get_scene_item_id("Main Scene", input_name)
         except OBSSceneItemNotFoundError:
             self.__logger.debug(f"Scene item {input_name} not found, skipping hide")
             return
@@ -141,29 +129,29 @@ class ObsControl:
             "sceneName": "Main Scene", "sceneItemId": input_id, "sceneItemEnabled": False
         }))
 
-    async def show_media(self, sourceId):
-        self.__logger.debug(f"making call SetSceneItemEnabled: {sourceId} true")
-        self.shown_media.add(sourceId)
+    async def show_media(self, source_id):
+        self.__logger.debug(f"making call SetSceneItemEnabled: {source_id} true")
+        self.shown_media.add(source_id)
         await self.ws.call(simpleobsws.Request("SetSceneItemEnabled", {
-            "sceneName": "Main Scene", "sceneItemId": sourceId, "sceneItemEnabled": True
+            "sceneName": "Main Scene", "sceneItemId": source_id, "sceneItemEnabled": True
         }))
 
 
-    async def on_replaybuffer_saved(self, eventData):
-        self.__logger.debug(eventData)
-        full_path = eventData.get("savedReplayPath")
-        dir = os.path.dirname(full_path)
+    async def on_replaybuffer_saved(self, event_data):
+        self.__logger.debug(event_data)
+        full_path = event_data.get("savedReplayPath")
+        directory = os.path.dirname(full_path)
         filename = os.path.basename(full_path)
-        for replay in os.listdir(dir):
+        for replay in os.listdir(directory):
             if replay.startswith("Replay") and replay != filename:
-                os.remove(os.path.join(dir, replay))
+                os.remove(os.path.join(directory, replay))
         try:
-            sceneItemId = await self.getSceneItemId("Main Scene", "instant replay")
+            scene_item_id = await self.get_scene_item_id("Main Scene", "instant replay")
         except OBSSceneItemNotFoundError:
             self.__logger.warning("Cannot show instant replay: scene item not found")
             return
         await asyncio.sleep(1)
-        await self.show_media(sceneItemId)
+        await self.show_media(scene_item_id)
 
 
 # async def hide_finished_media(eventData):

@@ -121,7 +121,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                                                  self.auth_filename,
                                                  streamlabs_alerts=pokegame_config.get('streamlabs_alerts', False))
 
-        self.obs_control = ObsControl(password='GlVRHdkopGW63tbZ', log_level=logging.DEBUG)
+        self.obs_control = ObsControl(password='GlVRHdkopGW63tbZ')
         self.obs_control.start()
 
         sfx_mappings = properties.get("sfx_mappings")
