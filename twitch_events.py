@@ -10,7 +10,7 @@ from playsound import playsound
 from obs_control import ObsControl
 from tts import TalkBot
 from pokemon import PokemonChatGame
-from twitch_eventsub_websocket import TwitchEventsubWebsocket
+from twitch_eventsub import TwitchEventsubWebsocket
 from twitch_rest_api import TwitchRestApi
 
 URL = "127.0.0.1"
