@@ -5,6 +5,17 @@ from dateutil.relativedelta import relativedelta
 import requests
 import yaml
 
+from exceptions import (
+    TwitchAPIRequestError,
+    TwitchResourceNotFoundError,
+    TokenValidationError,
+    TokenRefreshError,
+    TokenExchangeError,
+)
+from logging_config import get_logger
+
+logger = get_logger('twitch_rest_api')
+
 TWTICH = "twitch"
 
 CLIENT_ID = "client_id"
@@ -67,37 +78,39 @@ class TwitchRestApi:
 
         r = requests.post(url, params=params)
         data = r.json()
-        if r.status_code == 200:
-            self.oauth_token = data.get("access_token")
-            self.refresh_token = data.get(REFRESH_TOKEN)
-            self.props[OAUTH_TOKEN] = self.oauth_token
-            self.props[REFRESH_TOKEN] = self.refresh_token
-            self.auth_props[TWTICH] = self.props
-            with open(self.auth_filename, 'w') as f:
-                yaml.dump(self.auth_props, f)
-            return True
-        return False
+        if r.status_code != 200:
+            logger.error(f"Failed to exchange code for token: {data}")
+            raise TokenExchangeError(f"Failed to exchange auth code: {data.get('message', 'Unknown error')}")
+
+        self.oauth_token = data.get("access_token")
+        self.refresh_token = data.get(REFRESH_TOKEN)
+        self.props[OAUTH_TOKEN] = self.oauth_token
+        self.props[REFRESH_TOKEN] = self.refresh_token
+        self.auth_props[TWTICH] = self.props
+        with open(self.auth_filename, 'w') as f:
+            yaml.dump(self.auth_props, f)
 
     def validate_oauth_token(self, user=False):
+        """Validate OAuth token, refreshing if needed. Raises TokenRefreshError if refresh fails."""
         token = self.user_oauth if user else self.oauth_token
         url = AUTH_API_BASE + "validate"
         headers = {"Authorization": "Bearer " + token}
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
+            logger.info("OAuth token invalid, attempting refresh")
             self.refresh_oauth_token(user=user)
-            return False
-        return True
 
     def validate_app_token(self):
+        """Validate app token, refreshing if needed. Raises TokenRefreshError if refresh fails."""
         url = AUTH_API_BASE + "validate"
         headers = {"Authorization": "Bearer " + self.app_token}
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
-            return self.refresh_app_token()
-        return True
+            logger.info("App token invalid, attempting refresh")
+            self.refresh_app_token()
 
     def refresh_oauth_token(self, user=False):
-        token = self.user_oauth if user else self.oauth_token
+        """Refresh OAuth token. Raises TokenRefreshError on failure."""
         refresh = self.user_refresh if user else self.refresh_token
         url = AUTH_API_BASE + "token"
         params = {
@@ -108,26 +121,30 @@ class TwitchRestApi:
         }
         r = requests.post(url, params=params)
         data = r.json()
-        if r.status_code == 200:
-            refresh = data.get(REFRESH_TOKEN)
-            token = data.get("access_token")
-            if user:
-                self.props[USER_REFRESH] = refresh
-                self.props[USER_OAUTH] = token
-                self.user_refresh = refresh
-                self.user_oauth = token
-            else:
-                self.props[REFRESH_TOKEN] = refresh
-                self.props[OAUTH_TOKEN] = token
-                self.refresh_token = refresh
-                self.oauth_token = token
-            self.auth_props[TWTICH] = self.props
-            with open(self.auth_filename, 'w') as f:
-                yaml.dump(self.auth_props, f)
-            return True
-        return False
+        if r.status_code != 200:
+            token_type = "user" if user else "bot"
+            logger.error(f"Failed to refresh {token_type} OAuth token: {data}")
+            raise TokenRefreshError(f"Failed to refresh {token_type} OAuth token: {data.get('message', 'Unknown error')}")
+
+        refresh = data.get(REFRESH_TOKEN)
+        token = data.get("access_token")
+        if user:
+            self.props[USER_REFRESH] = refresh
+            self.props[USER_OAUTH] = token
+            self.user_refresh = refresh
+            self.user_oauth = token
+        else:
+            self.props[REFRESH_TOKEN] = refresh
+            self.props[OAUTH_TOKEN] = token
+            self.refresh_token = refresh
+            self.oauth_token = token
+        self.auth_props[TWTICH] = self.props
+        with open(self.auth_filename, 'w') as f:
+            yaml.dump(self.auth_props, f)
+        logger.info(f"Successfully refreshed {'user' if user else 'bot'} OAuth token")
 
     def refresh_app_token(self):
+        """Refresh app token. Raises TokenRefreshError on failure."""
         url = AUTH_API_BASE + "token"
         params = {
             "client_id": self.client_id,
@@ -138,14 +155,16 @@ class TwitchRestApi:
         r = requests.post(url, params=params)
         data = r.json()
 
-        if r.status_code == 200:
-            self.app_token = data.get("access_token")
-            self.props[APP_TOKEN] = self.app_token
-            self.auth_props[TWTICH] = self.props
-            with open(self.auth_filename, 'w') as f:
-                yaml.dump(self.auth_props, f)
-            return True
-        return False
+        if r.status_code != 200:
+            logger.error(f"Failed to refresh app token: {data}")
+            raise TokenRefreshError(f"Failed to refresh app token: {data.get('message', 'Unknown error')}")
+
+        self.app_token = data.get("access_token")
+        self.props[APP_TOKEN] = self.app_token
+        self.auth_props[TWTICH] = self.props
+        with open(self.auth_filename, 'w') as f:
+            yaml.dump(self.auth_props, f)
+        logger.info("Successfully refreshed app token")
 
     def get_app_token(self):
         self.validate_app_token()
@@ -160,6 +179,7 @@ class TwitchRestApi:
         return self.user_oauth
 
     def get_channel_id(self, channel_name):
+        """Get channel ID for a username. Raises TwitchResourceNotFoundError if not found."""
         self.validate_app_token()
         url = API_BASE + "users?login=" + channel_name
         headers = {
@@ -170,9 +190,11 @@ class TwitchRestApi:
         try:
             return r['data'][0]['id']
         except (KeyError, IndexError):
-            return False
+            logger.warning(f"Channel not found: {channel_name}")
+            raise TwitchResourceNotFoundError(f"Channel '{channel_name}' not found")
 
     def get_last_game_played(self, channel_id):
+        """Get last game played by channel. Raises TwitchResourceNotFoundError if not found."""
         self.validate_app_token()
         url = API_BASE + "channels"
         headers = {
@@ -183,9 +205,11 @@ class TwitchRestApi:
         try:
             return r['data'][0]['game_name']
         except (KeyError, IndexError):
-            return False
+            logger.warning(f"Channel info not found for ID: {channel_id}")
+            raise TwitchResourceNotFoundError(f"Channel info not found for ID: {channel_id}")
 
     def get_stream_info(self, channel_name):
+        """Get stream info. Returns None if stream is offline, raises on API error."""
         self.validate_app_token()
         url = API_BASE + "streams"
         headers = {
@@ -193,11 +217,13 @@ class TwitchRestApi:
             "Client-Id": self.client_id
         }
         r = requests.get(url, headers=headers, params={"user_login": channel_name})
-        if r.status_code == 200:
-            data = r.json().get('data')
-            if len(data) == 1:
-                return data[0]
-        return False
+        if r.status_code != 200:
+            logger.error(f"Failed to get stream info: {r.status_code}")
+            raise TwitchAPIRequestError(f"Failed to get stream info", status_code=r.status_code)
+        data = r.json().get('data')
+        if len(data) == 1:
+            return data[0]
+        return None  # Stream is offline
 
     def get_clips(self, channel_name, started_at: str=None) -> list:
         self.validate_app_token()
@@ -230,6 +256,7 @@ class TwitchRestApi:
         return r
 
     def get_eventsub_subscriptions(self):
+        """Get EventSub subscriptions. Raises TwitchAPIRequestError on failure."""
         self.validate_oauth_token(user=True)
         headers = {
             "Authorization": "Bearer " + self.user_oauth,
@@ -237,9 +264,10 @@ class TwitchRestApi:
         }
         url = API_BASE + "eventsub/subscriptions"
         r = requests.get(url, headers=headers)
-        if r.status_code == 200:
-            return r.json()
-        return False
+        if r.status_code != 200:
+            logger.error(f"Failed to get EventSub subscriptions: {r.status_code}")
+            raise TwitchAPIRequestError("Failed to get EventSub subscriptions", status_code=r.status_code)
+        return r.json()
 
     def delete_all_eventsub_subscriptions(self):
         self.validate_oauth_token(user=True)
@@ -301,6 +329,10 @@ class TwitchRestApi:
         return r.json()
 
     def get_followage(self, channel_name, follower_name) -> relativedelta:
+        """
+        Get follow age for a user.
+        Raises TwitchResourceNotFoundError if user doesn't follow the channel.
+        """
         self.validate_oauth_token()
         url = API_BASE + "channels/followers"
         headers = {
@@ -310,8 +342,6 @@ class TwitchRestApi:
         }
         channel_id = self.get_channel_id(channel_name)
         follower_id = self.get_channel_id(follower_name)
-        if not follower_id:
-            return False
 
         parameters = {
             "broadcaster_id": channel_id,
@@ -319,7 +349,7 @@ class TwitchRestApi:
         }
         r = requests.get(url, headers=headers, params=parameters).json()
         if len(r['data']) == 0:
-            return False
+            raise TwitchResourceNotFoundError(f"User '{follower_name}' does not follow '{channel_name}'")
         followed_at = r['data'][0]['followed_at']
 
         datetime_format = "%Y-%m-%dT%H:%M:%SZ"

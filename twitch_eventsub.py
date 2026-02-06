@@ -1,11 +1,10 @@
 import json
-import logging
-import sys
 import asyncio
 import threading
 
 import websockets
 
+from logging_config import get_logger
 from twitch_rest_api import TwitchRestApi
 
 DEFAULT_URL = "wss://eventsub.wss.twitch.tv/ws"
@@ -13,12 +12,11 @@ RECONNECT_BACKOFF_BASE = 1
 RECONNECT_BACKOFF_MAX = 120
 
 
-class TwitchEventsubWebsocket:
+class TwitchEventsub:
 
     def __init__(self,
                  twitch: TwitchRestApi,
-                 url=DEFAULT_URL,
-                 log_level=logging.ERROR):
+                 url=DEFAULT_URL):
         self.url = url
         self._connect_url = url
 
@@ -29,12 +27,7 @@ class TwitchEventsubWebsocket:
         self.subscription_list = []
         self.callbacks = {}
 
-        formatter = logging.Formatter("[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s")
-        self.__logger = logging.getLogger(__name__)
-        self.__logger.setLevel(log_level)
-        local_handler = logging.StreamHandler(stream=sys.stdout)
-        local_handler.setFormatter(formatter)
-        self.__logger.addHandler(local_handler)
+        self.__logger = get_logger('twitch_eventsub')
 
     def __run_hook(self):
         self.__logger.debug("starting")
@@ -95,7 +88,8 @@ class TwitchEventsubWebsocket:
                 self.__logger.debug('WebSocket closed. Code: {} | Reason: {}'.format(
                     self.ws.close_code, self.ws.close_reason))
                 return
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                self.__logger.warning(f"Failed to parse WebSocket message: {e}")
                 continue
 
     async def _handle_reconnect(self, payload):
@@ -214,6 +208,6 @@ class TwitchEventsubWebsocket:
 if __name__ == "__main__":
     twitch = TwitchRestApi(auth_filename="config/botjamin_auth.yaml")
     bean = twitch.get_channel_id("beanjamin25")
-    eventsub_websockets = TwitchEventsubWebsocket(twitch, log_level=logging.DEBUG)
-    eventsub_websockets.listen_channel_follow(bean, "hello")
-    eventsub_websockets.start()
+    eventsub = TwitchEventsub(twitch)
+    eventsub.listen_channel_follow(bean, "hello")
+    eventsub.start()

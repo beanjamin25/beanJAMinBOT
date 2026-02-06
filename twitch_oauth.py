@@ -97,7 +97,8 @@ class TwitchOauth:
             try:
                 await asyncio.sleep(1)
             except (CancelledError, asyncio.CancelledError):
-                pass
+                self.__logger.debug("Run check cancelled")
+                break
         for task in asyncio.all_tasks(self.__loop):
             task.cancel()
 
@@ -113,7 +114,7 @@ class TwitchOauth:
         try:
             self.__loop.run_until_complete(self.__run_check())
         except (CancelledError, asyncio.CancelledError):
-            pass
+            self.__logger.debug("OAuth server shutdown")
 
     def __start(self):
         self.__thread = Thread(target=self.__run, args=(self.__build_runner(),))

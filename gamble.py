@@ -1,6 +1,16 @@
 import json
 import random
 
+from exceptions import (
+    InsufficientPointsError,
+    InvalidBetError,
+    BetExceedsBalanceError,
+    NoDebtError,
+)
+from logging_config import get_logger
+
+logger = get_logger('gamble')
+
 DEFAULT_POINTS = 100
 POINTS = 'points'
 DEBTS = 'debts'
@@ -24,17 +34,17 @@ class SimpleGamble:
             return
 
         elif cmd == "gamble":
-            win = self.gamble(user, args)
-            points, debts = self.bank.get_points(user)
-            msg = None
-            if win is None:
-                msg = f"{user}, you don't have any points to gamble. You can borrow more points with !borrow if you want to keep playing!"
-            elif win is False:
-                msg = "You need to bet an integer number of points!"
-            elif win is True:
-                msg = f"{user}, you cant bet more points than you have! You can either bet all in with !gamble all in, or bet up to {points} points"
-            if msg is not None:
-                c.privmsg(self.channel, msg)
+            try:
+                win = self.gamble(user, args)
+            except InsufficientPointsError:
+                c.privmsg(self.channel, f"{user}, you don't have any points to gamble. You can borrow more points with !borrow if you want to keep playing!")
+                return
+            except InvalidBetError:
+                c.privmsg(self.channel, "You need to bet an integer number of points!")
+                return
+            except BetExceedsBalanceError:
+                points, debts = self.bank.get_points(user)
+                c.privmsg(self.channel, f"{user}, you cant bet more points than you have! You can either bet all in with !gamble all in, or bet up to {points} points")
                 return
 
             points, debts = self.bank.add_points(user, win)
@@ -61,44 +71,54 @@ class SimpleGamble:
             return
 
         elif cmd == "payback":
-            payback_result = self.bank.payback(user)
-            msg = None
-            if payback_result is None:
-                msg = f"{user}, you're already debt free, silly! You don't need to pay anything back yet!"
-            elif payback_result is False:
-                msg = f"{user}, you don't have any points to pay back your debts with! You'll need to borrow some points first with !borrow."
-
-            if msg is not None:
-                c.privmsg(self.channel, msg)
+            try:
+                points, debts = self.bank.payback(user)
+            except NoDebtError:
+                c.privmsg(self.channel, f"{user}, you're already debt free, silly! You don't need to pay anything back yet!")
+                return
+            except InsufficientPointsError:
+                c.privmsg(self.channel, f"{user}, you don't have any points to pay back your debts with! You'll need to borrow some points first with !borrow.")
                 return
 
-            points, debts = payback_result
             msg = f"Thanks for making a loan payment {user}. You now have {points} points and a remaining debt of {debts} points"
             c.privmsg(self.channel, msg)
             return
 
 
     def gamble(self, user, args):
-        c = self.connection
+        """
+        Process a gamble bet.
+
+        Returns:
+            int: Positive for win, negative for loss
+
+        Raises:
+            InsufficientPointsError: User has no points
+            InvalidBetError: Bet format is invalid
+            BetExceedsBalanceError: Bet exceeds available points
+        """
         points, debts = self.bank.get_points(user)
         if points == 0:
-            return None
+            raise InsufficientPointsError(f"{user} has no points to gamble")
 
+        bet = None
         if len(args) > 1:
             args = "".join(args)
             if args == "allin":
                 bet = points
-        try:
-            bet = int(args[0])
-        except IndexError:
-            bet = int(random.uniform(1, points+1))
-        except ValueError:
-            if args[0] == "allin" or args == "allin":
-                bet = points
-            else:
-                return False
+        if bet is None:
+            try:
+                bet = int(args[0])
+            except IndexError:
+                bet = int(random.uniform(1, points+1))
+            except ValueError:
+                if args[0] == "allin" or args == "allin":
+                    bet = points
+                else:
+                    raise InvalidBetError("Bet must be an integer or 'allin'")
+
         if bet > points:
-            return True
+            raise BetExceedsBalanceError(f"Bet {bet} exceeds available points {points}")
 
         win = random.uniform(0, 1) > 0.5
         if win:
@@ -111,7 +131,7 @@ class SimpleGamble:
 class GambleBank:
 
     def __init__(self, db=None):
-        print(db)
+        logger.debug(f"Initializing GambleBank with db: {db}")
         self.db = db
         self.bank = dict()
         if self.db is not None:
@@ -149,11 +169,21 @@ class GambleBank:
         return self.get_points(user)
 
     def payback(self, user):
+        """
+        Pay back debt with available points.
+
+        Returns:
+            tuple: (remaining_points, remaining_debt)
+
+        Raises:
+            NoDebtError: User has no debt
+            InsufficientPointsError: User has no points to pay back
+        """
         points, debts = self.get_points(user)
         if debts == 0:
-            return None
+            raise NoDebtError(f"{user} has no debt to pay back")
         if points == 0:
-            return False
+            raise InsufficientPointsError(f"{user} has no points to pay back debt")
 
         repayment_amount = min(points, debts)
         self.bank[user][POINTS] -= repayment_amount
