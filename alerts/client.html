@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BeanJAMinBOT Alerts</title>
+<style>
+/* ── Reset & OBS-friendly base ─────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+}
+
+#alert-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+}
+
+/* ── Alert box ─────────────────────────────────────────────────── */
+.alert-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: rgba(18, 18, 24, 0.85);
+    border-radius: 14px;
+    padding: 24px 32px;
+    max-width: 520px;
+    min-width: 280px;
+    border: 2px solid var(--accent-color, #00ff00);
+    box-shadow:
+        0 0 30px rgba(0, 0, 0, 0.6),
+        0 0 15px color-mix(in srgb, var(--accent-color, #00ff00) 30%, transparent);
+}
+
+/* ── Media (image / gif / video) ───────────────────────────────── */
+.alert-media {
+    max-width: 300px;
+    max-height: 300px;
+    margin-bottom: 16px;
+    border-radius: 10px;
+    object-fit: contain;
+}
+
+.alert-video {
+    max-width: 400px;
+    max-height: 300px;
+    margin-bottom: 16px;
+    border-radius: 10px;
+}
+
+/* ── Text ──────────────────────────────────────────────────────── */
+.alert-title {
+    font-size: 30px;
+    font-weight: 800;
+    color: var(--accent-color, #00ff00);
+    text-shadow:
+        0 0 12px color-mix(in srgb, var(--accent-color, #00ff00) 60%, transparent),
+        0 2px 4px rgba(0, 0, 0, 0.8);
+    margin-bottom: 8px;
+    text-align: center;
+    line-height: 1.2;
+}
+
+.alert-message {
+    font-size: var(--font-size, 20px);
+    color: var(--text-color, #ffffff);
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+    text-align: center;
+    line-height: 1.4;
+    white-space: pre-line;
+}
+
+/* ── Connection indicator (hidden in OBS, useful for setup) ───── */
+#connection-status {
+    position: fixed;
+    bottom: 8px;
+    right: 8px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    opacity: 0.7;
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+#connection-status.connected    { background: #2d7d46; }
+#connection-status.disconnected { background: #c0392b; }
+#connection-status.hidden       { opacity: 0; }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Fade ──────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+@keyframes fadeOut {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}
+.fadeIn  { animation: fadeIn  0.5s ease both; }
+.fadeOut { animation: fadeOut 0.5s ease both; }
+
+/* ── Fade + translate ──────────────────────────────────────────── */
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(40px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeOutDown {
+    from { opacity: 1; transform: translateY(0); }
+    to   { opacity: 0; transform: translateY(40px); }
+}
+@keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-40px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeOutUp {
+    from { opacity: 1; transform: translateY(0); }
+    to   { opacity: 0; transform: translateY(-40px); }
+}
+.fadeInUp    { animation: fadeInUp    0.5s ease both; }
+.fadeOutDown { animation: fadeOutDown 0.5s ease both; }
+.fadeInDown  { animation: fadeInDown  0.5s ease both; }
+.fadeOutUp   { animation: fadeOutUp   0.5s ease both; }
+
+/* ── Slide ─────────────────────────────────────────────────────── */
+@keyframes slideInLeft {
+    from { opacity: 0; transform: translateX(-100px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slideOutRight {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(100px); }
+}
+@keyframes slideInRight {
+    from { opacity: 0; transform: translateX(100px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slideOutLeft {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(-100px); }
+}
+.slideInLeft   { animation: slideInLeft   0.5s ease both; }
+.slideOutRight { animation: slideOutRight 0.5s ease both; }
+.slideInRight  { animation: slideInRight  0.5s ease both; }
+.slideOutLeft  { animation: slideOutLeft  0.5s ease both; }
+
+/* ── Bounce ────────────────────────────────────────────────────── */
+@keyframes bounceIn {
+    0%   { opacity: 0; transform: scale(0.3); }
+    50%  { opacity: 1; transform: scale(1.08); }
+    70%  { transform: scale(0.95); }
+    100% { transform: scale(1); }
+}
+@keyframes bounceOut {
+    0%   { transform: scale(1); }
+    25%  { transform: scale(1.08); }
+    100% { opacity: 0; transform: scale(0.3); }
+}
+.bounceIn  { animation: bounceIn  0.6s ease both; }
+.bounceOut { animation: bounceOut 0.5s ease both; }
+
+/* ── Zoom ──────────────────────────────────────────────────────── */
+@keyframes zoomIn {
+    from { opacity: 0; transform: scale(0.5); }
+    to   { opacity: 1; transform: scale(1); }
+}
+@keyframes zoomOut {
+    from { opacity: 1; transform: scale(1); }
+    to   { opacity: 0; transform: scale(0.5); }
+}
+.zoomIn  { animation: zoomIn  0.4s ease both; }
+.zoomOut { animation: zoomOut 0.4s ease both; }
+
+/* ── Jackpot / emphasis pulse ──────────────────────────────────── */
+@keyframes jackpotIn {
+    0%   { opacity: 0; transform: scale(0) rotate(-15deg); }
+    60%  { opacity: 1; transform: scale(1.15) rotate(3deg); }
+    80%  { transform: scale(0.95) rotate(-1deg); }
+    100% { transform: scale(1) rotate(0deg); }
+}
+.jackpotIn { animation: jackpotIn 0.7s ease both; }
+</style>
+</head>
+<body>
+
+<div id="alert-container"></div>
+<div id="connection-status" class="disconnected">Disconnected</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   BeanJAMinBOT Alert Client
+   ─────────────────────────────────────────────────────────────
+   URL parameters:
+     ?port=8765      WebSocket server port  (default: 8765)
+     ?host=localhost  WebSocket server host  (default: localhost)
+     ?test=1          Show a test alert on connect
+     ?status=0        Hide the connection status indicator
+   ═══════════════════════════════════════════════════════════════ */
+
+(function () {
+    'use strict';
+
+    // ── Configuration via URL params ────────────────────────────
+    const params   = new URLSearchParams(window.location.search);
+    const WS_HOST  = params.get('host') || 'localhost';
+    const WS_PORT  = params.get('port') || '8765';
+    const WS_URL   = `ws://${WS_HOST}:${WS_PORT}`;
+    const SHOW_TEST   = params.get('test') === '1';
+    const SHOW_STATUS = params.get('status') !== '0';
+
+    const container = document.getElementById('alert-container');
+    const statusEl  = document.getElementById('connection-status');
+
+    // ── Alert queue ─────────────────────────────────────────────
+    const alertQueue = [];
+    let isPlaying = false;
+
+    // ── Animation duration detection ────────────────────────────
+    const ANIMATION_DURATIONS = {
+        fadeIn: 500, fadeOut: 500,
+        fadeInUp: 500, fadeOutDown: 500,
+        fadeInDown: 500, fadeOutUp: 500,
+        slideInLeft: 500, slideOutRight: 500,
+        slideInRight: 500, slideOutLeft: 500,
+        bounceIn: 600, bounceOut: 500,
+        zoomIn: 400, zoomOut: 400,
+        jackpotIn: 700,
+    };
+
+    function getAnimDuration(name) {
+        return ANIMATION_DURATIONS[name] || 500;
+    }
+
+    // ── WebSocket connection ────────────────────────────────────
+    let ws = null;
+    let reconnectDelay = 1000;
+    const MAX_RECONNECT = 30000;
+
+    function setStatus(connected) {
+        statusEl.className = connected ? 'connected' : 'disconnected';
+        statusEl.textContent = connected ? 'Connected' : 'Disconnected';
+        if (!SHOW_STATUS) statusEl.classList.add('hidden');
+
+        // Auto-hide the "connected" label after 3 seconds
+        if (connected) {
+            setTimeout(() => statusEl.classList.add('hidden'), 3000);
+        }
+    }
+
+    function connect() {
+        ws = new WebSocket(WS_URL);
+
+        ws.onopen = function () {
+            console.log('[AlertClient] Connected to', WS_URL);
+            setStatus(true);
+            reconnectDelay = 1000;
+
+            if (SHOW_TEST) sendTestAlert();
+        };
+
+        ws.onmessage = function (event) {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'alert') {
+                    enqueueAlert(msg);
+                }
+            } catch (e) {
+                console.warn('[AlertClient] Bad message:', e);
+            }
+        };
+
+        ws.onclose = function () {
+            console.log('[AlertClient] Disconnected, reconnecting in', reconnectDelay, 'ms');
+            setStatus(false);
+            setTimeout(connect, reconnectDelay);
+            reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT);
+        };
+
+        ws.onerror = function (err) {
+            console.error('[AlertClient] WebSocket error:', err);
+            ws.close();
+        };
+    }
+
+    // ── Queue management ────────────────────────────────────────
+
+    function enqueueAlert(alert) {
+        alertQueue.push(alert);
+        if (!isPlaying) processQueue();
+    }
+
+    function processQueue() {
+        if (alertQueue.length === 0) {
+            isPlaying = false;
+            return;
+        }
+        isPlaying = true;
+        const alert = alertQueue.shift();
+        showAlert(alert);
+    }
+
+    // ── Render an alert ─────────────────────────────────────────
+
+    function showAlert(alert) {
+        const d = alert.data;
+        const alertId = alert.alert_id;
+        const animIn  = d.animation_in  || 'fadeInUp';
+        const animOut = d.animation_out || 'fadeOutDown';
+        const duration = d.duration || 5000;
+
+        // Build the alert DOM
+        const box = document.createElement('div');
+        box.className = `alert-box ${animIn}`;
+        box.style.setProperty('--accent-color', d.accent_color || '#00ff00');
+        box.style.setProperty('--text-color', d.text_color || '#ffffff');
+        box.style.setProperty('--font-size', d.font_size || '20px');
+
+        let mediaReady = Promise.resolve();
+
+        // Image / GIF
+        if (d.image && !d.video) {
+            const img = document.createElement('img');
+            img.className = 'alert-media';
+            img.src = d.image;
+            img.alt = '';
+            mediaReady = new Promise(resolve => {
+                img.onload = resolve;
+                img.onerror = resolve; // still show alert if image fails
+            });
+            box.appendChild(img);
+        }
+
+        // Video
+        if (d.video) {
+            const video = document.createElement('video');
+            video.className = 'alert-video';
+            video.autoplay = true;
+            video.muted = false;
+            video.playsInline = true;
+
+            const source = document.createElement('source');
+            source.src = d.video;
+            video.appendChild(source);
+            mediaReady = new Promise(resolve => {
+                video.oncanplay = resolve;
+                video.onerror = resolve;
+            });
+            box.appendChild(video);
+        }
+
+        // Title
+        if (d.title) {
+            const title = document.createElement('div');
+            title.className = 'alert-title';
+            title.textContent = d.title;
+            box.appendChild(title);
+        }
+
+        // Message
+        if (d.message) {
+            const msg = document.createElement('div');
+            msg.className = 'alert-message';
+            msg.textContent = d.message;
+            box.appendChild(msg);
+        }
+
+        // Sound
+        let audio = null;
+        if (d.sound) {
+            audio = new Audio(d.sound);
+            audio.volume = 1.0;
+        }
+
+        // Wait for media to be ready, then show
+        mediaReady.then(() => {
+            container.appendChild(box);
+
+            if (audio) {
+                audio.play().catch(e =>
+                    console.warn('[AlertClient] Audio play failed:', e)
+                );
+            }
+
+            // Schedule exit
+            const exitDelay = duration + getAnimDuration(animIn);
+            setTimeout(() => hideAlert(box, animIn, animOut, alertId), exitDelay);
+        });
+    }
+
+    function hideAlert(box, animIn, animOut, alertId) {
+        // Swap animation classes
+        box.classList.remove(animIn);
+        box.classList.add(animOut);
+
+        const outDuration = getAnimDuration(animOut);
+        setTimeout(() => {
+            box.remove();
+            notifyComplete(alertId);
+            processQueue();
+        }, outDuration + 50);
+    }
+
+    function notifyComplete(alertId) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'alert_complete',
+                alert_id: alertId,
+            }));
+        }
+    }
+
+    // ── Test alert ──────────────────────────────────────────────
+
+    function sendTestAlert() {
+        enqueueAlert({
+            type: 'alert',
+            alert_id: 'test-' + Date.now(),
+            alert_type: 'custom',
+            data: {
+                title: 'Alert System Connected!',
+                message: 'BeanJAMinBOT alerts are working.',
+                image: '',
+                video: '',
+                sound: '',
+                duration: 4000,
+                animation_in: 'bounceIn',
+                animation_out: 'fadeOutDown',
+                text_color: '#ffffff',
+                font_size: '20px',
+                accent_color: '#00ff88',
+            }
+        });
+    }
+
+    // ── Start ───────────────────────────────────────────────────
+    connect();
+
+})();
+</script>
+</body>
+</html>
