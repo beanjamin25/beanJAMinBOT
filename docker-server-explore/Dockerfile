@@ -5,6 +5,7 @@ RUN microdnf install -y \
         python3 \
         python3-pip \
         krb5-workstation \
+        cronie \
     && microdnf clean all
 
 # Nginx on UBI doesn't use sites-enabled; drop config into conf.d
@@ -18,6 +19,7 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY start.sh .
 COPY kinit-renew.sh .
+COPY kinit-cron.sh .
 COPY nginx.conf /etc/nginx/conf.d/bottle.conf
 
 EXPOSE 443
