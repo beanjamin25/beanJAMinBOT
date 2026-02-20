@@ -1,0 +1,16 @@
+services:
+  bottle-nginx:
+    build: .
+    ports:
+      - "443:443"
+    environment:
+      - KRB5_PRINCIPAL=${KRB5_PRINCIPAL}
+      - KRB5_KEYTAB=/etc/krb5/robot.keytab
+    volumes:
+      # SSL certificates (read-only)
+      - ${SSL_CERT_PATH}:/etc/nginx/ssl/cert.pem:ro
+      - ${SSL_KEY_PATH}:/etc/nginx/ssl/key.pem:ro
+      # Kerberos keytab (read-only)
+      - ${KEYTAB_PATH}:/etc/krb5/robot.keytab:ro
+      # Logs (writable)
+      - ./logs:/var/log/app
