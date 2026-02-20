@@ -1,21 +1,24 @@
-FROM python:3.12-slim
+FROM registry.access.redhat.com/ubi9/ubi-minimal
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends nginx openssl && \
-    rm -rf /var/lib/apt/lists/*
+RUN microdnf install -y \
+        nginx \
+        python3 \
+        python3-pip \
+        krb5-workstation \
+    && microdnf clean all
 
-# Remove the default nginx site
-RUN rm -f /etc/nginx/sites-enabled/default
+# Nginx on UBI doesn't use sites-enabled; drop config into conf.d
+RUN mkdir -p /etc/nginx/conf.d
 
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 COPY start.sh .
-COPY generate-certs.sh .
-COPY nginx.conf /etc/nginx/sites-enabled/bottle.conf
+COPY kinit-renew.sh .
+COPY nginx.conf /etc/nginx/conf.d/bottle.conf
 
 EXPOSE 443
 

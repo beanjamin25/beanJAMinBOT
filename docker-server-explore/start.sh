@@ -1,13 +1,13 @@
 #!/bin/sh
 set -e
 
-# Generate self-signed certs if they don't already exist
-if [ ! -f /etc/nginx/ssl/cert.pem ]; then
-    /app/generate-certs.sh
-fi
+# --- Kerberos ---
+# Obtain an initial ticket, then start the renewal loop in the background.
+kinit "${KRB5_PRINCIPAL}" -kt "${KRB5_KEYTAB}"
+/app/kinit-renew.sh &
 
-# Start the Bottle app in the background
-python /app/app.py &
+# --- Bottle app ---
+python3 /app/app.py &
 
-# Start nginx in the foreground
+# --- Nginx (foreground) ---
 nginx -g "daemon off;"
