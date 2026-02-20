@@ -14,9 +14,17 @@ You will need three files from your environment:
 | `key.pem` | TLS private key |
 | `robot.keytab` | Kerberos keytab for the service principal |
 
+## Building the image
+
+The image should be built and tagged ahead of time:
+
+```bash
+docker build -t bottle-nginx:1.0.0 .
+```
+
 ## Running with docker compose
 
-1. Copy `.env.example` to `.env` and fill in the values:
+1. Copy `.env.example` to `.env` and fill in the values (including `IMAGE_TAG`):
 
    ```
    cp .env.example .env
@@ -25,7 +33,7 @@ You will need three files from your environment:
 2. Start the container:
 
    ```
-   docker compose up --build -d
+   docker compose up -d
    ```
 
 3. Logs will appear in the `./logs/` directory on the host.
@@ -33,8 +41,6 @@ You will need three files from your environment:
 ## Running with docker run
 
 ```bash
-docker build -t bottle-nginx .
-
 docker run -d -p 443:443 \
   -v /path/to/cert.pem:/etc/nginx/ssl/cert.pem:ro \
   -v /path/to/key.pem:/etc/nginx/ssl/key.pem:ro \
@@ -42,7 +48,7 @@ docker run -d -p 443:443 \
   -v ./logs:/var/log/app \
   -e KRB5_PRINCIPAL=my_robot_account \
   -e KRB5_KEYTAB=/etc/krb5/robot.keytab \
-  bottle-nginx
+  bottle-nginx:1.0.0
 ```
 
 ## Logs

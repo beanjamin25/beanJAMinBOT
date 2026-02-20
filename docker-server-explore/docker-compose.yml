@@ -1,6 +1,6 @@
 services:
   bottle-nginx:
-    build: .
+    image: bottle-nginx:${IMAGE_TAG}
     ports:
       - "443:443"
     environment:
