@@ -1,0 +1,42 @@
+---
+- name: Ensure log directory exists
+  ansible.builtin.file:
+    path: "{{ log_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Copy Dockerfile context to remote host
+  ansible.builtin.synchronize:
+    src: "{{ bottle_build_context }}/"
+    dest: /opt/bottle-nginx/build/
+    delete: true
+    rsync_opts:
+      - "--exclude=ansible"
+      - "--exclude=logs"
+      - "--exclude=.env"
+
+- name: Build the Docker image
+  community.docker.docker_image:
+    name: "{{ bottle_image_name }}"
+    tag: "{{ bottle_image_tag }}"
+    source: build
+    build:
+      path: /opt/bottle-nginx/build
+      pull: true
+    force_source: true
+
+- name: Run the container
+  community.docker.docker_container:
+    name: "{{ bottle_container_name }}"
+    image: "{{ bottle_image_name }}:{{ bottle_image_tag }}"
+    state: started
+    restart_policy: unless-stopped
+    published_ports: "{{ bottle_published_ports }}"
+    env:
+      KRB5_PRINCIPAL: "{{ krb5_principal }}"
+      KRB5_KEYTAB: /etc/krb5/robot.keytab
+    volumes:
+      - "{{ ssl_cert_path }}:/etc/nginx/ssl/cert.pem:ro"
+      - "{{ ssl_key_path }}:/etc/nginx/ssl/key.pem:ro"
+      - "{{ keytab_path }}:/etc/krb5/robot.keytab:ro"
+      - "{{ log_dir }}:/var/log/app"

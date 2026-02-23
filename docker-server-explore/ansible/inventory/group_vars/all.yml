@@ -1,0 +1,23 @@
+---
+# Docker image settings
+bottle_image_name: bottle-nginx
+bottle_image_tag: "1.0.0"
+
+# Path to the Dockerfile context on the control node (relative to playbook)
+bottle_build_context: "{{ playbook_dir }}/.."
+
+# Container settings
+bottle_container_name: bottle-nginx
+bottle_published_ports:
+  - "443:443"
+
+# Host paths for bind mounts — override per-host in host_vars if needed
+ssl_cert_path: /etc/pki/tls/certs/cert.pem
+ssl_key_path: /etc/pki/tls/private/key.pem
+keytab_path: /etc/krb5/robot.keytab
+
+# Kerberos
+krb5_principal: my_robot_account
+
+# Log directory on the host
+log_dir: /var/log/bottle-nginx

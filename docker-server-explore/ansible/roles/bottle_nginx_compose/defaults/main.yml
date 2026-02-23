@@ -1,0 +1,14 @@
+---
+# Defaults for the bottle_nginx_compose role
+bottle_image_name: bottle-nginx
+bottle_image_tag: "1.0.0"
+bottle_container_name: bottle-nginx
+
+ssl_cert_path: /etc/pki/tls/certs/cert.pem
+ssl_key_path: /etc/pki/tls/private/key.pem
+keytab_path: /etc/krb5/robot.keytab
+krb5_principal: my_robot_account
+log_dir: /var/log/bottle-nginx
+
+# Remote directory where the project is deployed
+bottle_deploy_dir: /opt/bottle-nginx
