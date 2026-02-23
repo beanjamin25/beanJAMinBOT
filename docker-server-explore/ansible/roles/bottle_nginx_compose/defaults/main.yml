@@ -1,6 +1,13 @@
 ---
 # Defaults for the bottle_nginx_compose role
-bottle_image_name: bottle-nginx
+
+# Private registry
+docker_registry: registry.example.com
+docker_registry_username: deployer
+# docker_registry_password: should be provided via vault or --extra-vars
+
+# Image
+bottle_image_name: "{{ docker_registry }}/bottle-nginx"
 bottle_image_tag: "1.0.0"
 bottle_container_name: bottle-nginx
 

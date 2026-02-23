@@ -1,10 +1,12 @@
 ---
-# Docker image settings
-bottle_image_name: bottle-nginx
-bottle_image_tag: "1.0.0"
+# Private registry
+docker_registry: registry.example.com
+docker_registry_username: deployer
+# docker_registry_password: set via --extra-vars, vault, or env var
 
-# Path to the Dockerfile context on the control node (relative to playbook)
-bottle_build_context: "{{ playbook_dir }}/.."
+# Docker image settings
+bottle_image_name: "{{ docker_registry }}/bottle-nginx"
+bottle_image_tag: "1.0.0"
 
 # Container settings
 bottle_container_name: bottle-nginx

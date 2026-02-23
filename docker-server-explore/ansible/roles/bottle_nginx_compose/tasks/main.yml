@@ -11,25 +11,11 @@
     state: directory
     mode: "0755"
 
-- name: Sync Dockerfile context to remote host
-  ansible.builtin.synchronize:
-    src: "{{ bottle_build_context }}/"
-    dest: "{{ bottle_deploy_dir }}/build/"
-    delete: true
-    rsync_opts:
-      - "--exclude=ansible"
-      - "--exclude=logs"
-      - "--exclude=.env"
-
-- name: Build the Docker image
-  community.docker.docker_image:
-    name: "{{ bottle_image_name }}"
-    tag: "{{ bottle_image_tag }}"
-    source: build
-    build:
-      path: "{{ bottle_deploy_dir }}/build"
-      pull: true
-    force_source: true
+- name: Log in to private registry
+  community.docker.docker_login:
+    registry_url: "{{ docker_registry }}"
+    username: "{{ docker_registry_username }}"
+    password: "{{ docker_registry_password }}"
 
 - name: Template docker-compose.yml to remote host
   ansible.builtin.template:
@@ -42,4 +28,5 @@
   community.docker.docker_compose_v2:
     project_src: "{{ bottle_deploy_dir }}"
     state: present
+    pull: always
     recreate: "{{ 'always' if compose_file.changed else 'never' }}"
