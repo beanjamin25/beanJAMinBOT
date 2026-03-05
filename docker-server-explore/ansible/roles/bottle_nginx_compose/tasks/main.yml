@@ -1,0 +1,35 @@
+---
+- name: Ensure deploy directory exists
+  ansible.builtin.file:
+    path: "{{ bottle_deploy_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Ensure log directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ bottle_log_dir }}"
+    - "{{ nginx_log_dir }}"
+
+- name: Log in to private registry
+  community.docker.docker_login:
+    registry_url: "{{ docker_registry }}"
+    username: "{{ docker_registry_username }}"
+    password: "{{ docker_registry_password }}"
+
+- name: Template docker-compose.yml to remote host
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ bottle_deploy_dir }}/docker-compose.yml"
+    mode: "0644"
+  register: compose_file
+
+- name: Deploy with docker compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ bottle_deploy_dir }}"
+    state: present
+    pull: always
+    recreate: "{{ 'always' if compose_file.changed else 'never' }}"

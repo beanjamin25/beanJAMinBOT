@@ -1,0 +1,19 @@
+---
+- name: Deploy Bottle + Nginx container
+  hosts: all
+  become: true
+
+  pre_tasks:
+    - name: Ensure Docker is installed
+      ansible.builtin.package:
+        name: docker
+        state: present
+
+    - name: Ensure Docker service is running
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+  roles:
+    - bottle_nginx

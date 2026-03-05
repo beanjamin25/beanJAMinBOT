@@ -1,0 +1,33 @@
+services:
+  bottle:
+    image: ${BOTTLE_IMAGE}:${IMAGE_TAG}
+    environment:
+      - KRB5_PRINCIPAL=${KRB5_PRINCIPAL}
+      - KRB5_KEYTAB=/etc/krb5/robot.keytab
+    volumes:
+      # Kerberos keytab (read-only)
+      - ${KEYTAB_PATH}:/etc/krb5/robot.keytab:ro
+      # Logs (writable)
+      - ./logs/bottle:/var/log/app
+    networks:
+      - internal
+
+  nginx:
+    image: nginx:${NGINX_TAG:-latest}
+    ports:
+      - "443:443"
+    volumes:
+      # Nginx config (read-only)
+      - ./nginx-conf/bottle.conf:/etc/nginx/conf.d/bottle.conf:ro
+      # SSL certificates (read-only)
+      - ${SSL_CERT_PATH}:/etc/nginx/ssl/cert.pem:ro
+      - ${SSL_KEY_PATH}:/etc/nginx/ssl/key.pem:ro
+      # Logs (writable)
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - bottle
+    networks:
+      - internal
+
+networks:
+  internal:

@@ -1,0 +1,65 @@
+---
+- name: Ensure log directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ bottle_log_dir }}"
+    - "{{ nginx_log_dir }}"
+
+- name: Log in to private registry
+  community.docker.docker_login:
+    registry_url: "{{ docker_registry }}"
+    username: "{{ docker_registry_username }}"
+    password: "{{ docker_registry_password }}"
+
+- name: Pull bottle app image from private registry
+  community.docker.docker_image:
+    name: "{{ bottle_image_name }}"
+    tag: "{{ bottle_image_tag }}"
+    source: pull
+    force_source: true
+
+- name: Pull official nginx image
+  community.docker.docker_image:
+    name: "{{ nginx_image }}"
+    tag: "{{ nginx_image_tag }}"
+    source: pull
+    force_source: true
+
+- name: Create application network
+  community.docker.docker_network:
+    name: "{{ app_network_name }}"
+
+- name: Run bottle app container
+  community.docker.docker_container:
+    name: "{{ bottle_container_name }}"
+    image: "{{ bottle_image_name }}:{{ bottle_image_tag }}"
+    state: started
+    restart_policy: unless-stopped
+    env:
+      KRB5_PRINCIPAL: "{{ krb5_principal }}"
+      KRB5_KEYTAB: /etc/krb5/robot.keytab
+    volumes:
+      - "{{ keytab_path }}:/etc/krb5/robot.keytab:ro"
+      - "{{ bottle_log_dir }}:/var/log/app"
+    networks:
+      - name: "{{ app_network_name }}"
+        aliases:
+          - bottle
+
+- name: Run nginx container
+  community.docker.docker_container:
+    name: "{{ nginx_container_name }}"
+    image: "{{ nginx_image }}:{{ nginx_image_tag }}"
+    state: started
+    restart_policy: unless-stopped
+    published_ports: "{{ nginx_published_ports }}"
+    volumes:
+      - "{{ nginx_conf_path }}:/etc/nginx/conf.d/bottle.conf:ro"
+      - "{{ ssl_cert_path }}:/etc/nginx/ssl/cert.pem:ro"
+      - "{{ ssl_key_path }}:/etc/nginx/ssl/key.pem:ro"
+      - "{{ nginx_log_dir }}:/var/log/nginx"
+    networks:
+      - name: "{{ app_network_name }}"
