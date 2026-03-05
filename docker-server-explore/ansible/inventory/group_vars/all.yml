@@ -4,13 +4,16 @@ docker_registry: registry.example.com
 docker_registry_username: deployer
 # docker_registry_password: set via --extra-vars, vault, or env var
 
-# Docker image settings
-bottle_image_name: "{{ docker_registry }}/bottle-nginx"
+# Bottle app image (from private registry)
+bottle_image_name: "{{ docker_registry }}/bottle-app"
 bottle_image_tag: "1.0.0"
+bottle_container_name: bottle-app
 
-# Container settings
-bottle_container_name: bottle-nginx
-bottle_published_ports:
+# Nginx image (official, pulled from Docker Hub)
+nginx_image: nginx
+nginx_image_tag: latest
+nginx_container_name: nginx-proxy
+nginx_published_ports:
   - "443:443"
 
 # Host paths for bind mounts — override per-host in host_vars if needed
@@ -18,8 +21,15 @@ ssl_cert_path: /etc/pki/tls/certs/cert.pem
 ssl_key_path: /etc/pki/tls/private/key.pem
 keytab_path: /etc/krb5/robot.keytab
 
+# Nginx config file on the host (deployed by Ansible or pre-existing)
+nginx_conf_path: /etc/nginx-bottle/bottle.conf
+
 # Kerberos
 krb5_principal: my_robot_account
 
-# Log directory on the host
-log_dir: /var/log/bottle-nginx
+# Log directories on the host
+bottle_log_dir: /var/log/bottle-app
+nginx_log_dir: /var/log/nginx-proxy
+
+# Remote directory where the compose file is deployed
+bottle_deploy_dir: /opt/bottle-nginx

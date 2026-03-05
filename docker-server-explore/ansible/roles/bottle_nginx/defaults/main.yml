@@ -6,15 +6,25 @@ docker_registry: registry.example.com
 docker_registry_username: deployer
 # docker_registry_password: should be provided via vault or --extra-vars
 
-# Image
-bottle_image_name: "{{ docker_registry }}/bottle-nginx"
+# Bottle app image (from private registry)
+bottle_image_name: "{{ docker_registry }}/bottle-app"
 bottle_image_tag: "1.0.0"
-bottle_container_name: bottle-nginx
-bottle_published_ports:
+bottle_container_name: bottle-app
+
+# Nginx image (official, from Docker Hub)
+nginx_image: nginx
+nginx_image_tag: latest
+nginx_container_name: nginx-proxy
+nginx_published_ports:
   - "443:443"
+
+# Docker network
+app_network_name: bottle-network
 
 ssl_cert_path: /etc/pki/tls/certs/cert.pem
 ssl_key_path: /etc/pki/tls/private/key.pem
 keytab_path: /etc/krb5/robot.keytab
+nginx_conf_path: /etc/nginx-bottle/bottle.conf
 krb5_principal: my_robot_account
-log_dir: /var/log/bottle-nginx
+bottle_log_dir: /var/log/bottle-app
+nginx_log_dir: /var/log/nginx-proxy

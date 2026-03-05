@@ -1,13 +1,14 @@
 # Ansible Deployment for Bottle + Nginx
 
-Deploys the Bottle + Nginx Docker container using the `community.docker` Ansible collection. Images are pulled from a private registry (e.g. JFrog Artifactory). Two deployment approaches are provided for comparison.
+Deploys the Bottle app and Nginx reverse proxy as two Docker containers using the `community.docker` Ansible collection. Images are pulled from a private registry (e.g. JFrog Artifactory). Two deployment approaches are provided for comparison.
 
 ## Prerequisites
 
 - Ansible 2.14+
 - SSH access to target host(s)
 - Docker installed on target (or let the playbook install it)
-- Pre-built `bottle-nginx` image pushed to a private Docker registry
+- Pre-built `bottle-app` image pushed to a private Docker registry
+- Access to Docker Hub for the official `nginx` image
 
 ## Setup
 
@@ -23,9 +24,10 @@ ansible-galaxy collection install -r requirements.yml
 2. Adjust variables in `inventory/group_vars/all.yml`:
    - `docker_registry` — private registry URL (e.g. `registry.example.com`)
    - `docker_registry_username` — registry login user
+   - `bottle_image_tag` — app image version to pull
+   - `nginx_image_tag` — official nginx image tag (default: `latest`)
    - `ssl_cert_path`, `ssl_key_path`, `keytab_path` — host paths to mount
    - `krb5_principal` — Kerberos principal name
-   - `bottle_image_tag` — image version to pull
 
 ### Registry Password
 
@@ -46,7 +48,7 @@ ansible-playbook ... --extra-vars "docker_registry_password=my-secret"
 
 ### 1. Direct Container Management (`deploy.yml`)
 
-Uses `community.docker.docker_container` to manage the container directly from Ansible. Each container setting (ports, volumes, env) is defined as Ansible variables.
+Uses `community.docker.docker_container` and `community.docker.docker_network` to manage both containers directly from Ansible. The bottle container is placed on a shared Docker network with a `bottle` alias so the nginx container can reach it.
 
 ```bash
 ansible-playbook -i inventory/hosts.yml deploy.yml --extra-vars "docker_registry_password=my-secret"

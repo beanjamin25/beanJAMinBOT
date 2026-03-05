@@ -75,9 +75,9 @@ The bot uses a main IRC thread plus multiple daemon threads. Inter-thread commun
 
 The `docker-server-explore/` directory is a standalone exploration area for containerized deployment, separate from the bot codebase.
 
-- **Bottle + Nginx app** — A minimal Bottle web app behind Nginx with SSL termination and Kerberos auth, running in a single UBI9 container. Includes Dockerfile, docker-compose.yml, Nginx config, and Kerberos kinit scripts.
+- **Two-container architecture** — A Bottle web app (`bottle/`) in a non-root UBI9 container (`portaluser`), and the official `nginx` image for SSL termination. Nginx config is in `nginx-conf/` and bind-mounted at runtime. Kerberos ticket renewal via a background loop (`kinit-renew.sh`).
 - **Ansible deployment** (`docker-server-explore/ansible/`) — Two approaches using the `community.docker` Ansible collection:
-  - `deploy.yml` + `bottle_nginx` role — Direct container management via `docker_container`
+  - `deploy.yml` + `bottle_nginx` role — Direct container management via `docker_container` + `docker_network`
   - `deploy-compose.yml` + `bottle_nginx_compose` role — Compose-based via `docker_compose_v2` with a templated compose file
 - **Branch:** `claude/bottle-nginx-docker-setup-MBZaV`
 

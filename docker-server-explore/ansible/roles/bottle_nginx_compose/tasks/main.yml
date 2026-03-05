@@ -5,11 +5,14 @@
     state: directory
     mode: "0755"
 
-- name: Ensure log directory exists
+- name: Ensure log directories exist
   ansible.builtin.file:
-    path: "{{ log_dir }}"
+    path: "{{ item }}"
     state: directory
     mode: "0755"
+  loop:
+    - "{{ bottle_log_dir }}"
+    - "{{ nginx_log_dir }}"
 
 - name: Log in to private registry
   community.docker.docker_login:

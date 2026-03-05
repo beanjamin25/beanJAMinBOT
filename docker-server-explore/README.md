@@ -1,12 +1,23 @@
 # docker-server-explore
 
-Bottle web app behind Nginx with TLS termination, running in a single
-RHEL-based (UBI 9) Docker container. Kerberos tickets are renewed daily
-via cron for IPA-authenticated services.
+Bottle web app and Nginx reverse proxy running as two containers, orchestrated
+with Docker Compose. The Bottle app runs in a custom UBI 9 container as a
+non-root user (`portaluser`). Nginx uses the official `nginx` image with
+config files mounted at runtime. Nginx handles TLS termination; Kerberos
+tickets are renewed via a background loop in the app container.
+
+## Architecture
+
+```
+                 ┌──────────────┐       ┌──────────────┐
+  :443 ──────►   │    nginx     │──────►│   bottle     │
+  (host)         │  :443 ssl    │ :8080 │  python app  │
+                 │  (official)  │       │ (portaluser) │
+                 └──────────────┘       └──────────────┘
+                        Docker network: internal
+```
 
 ## Prerequisites
-
-You will need three files from your environment:
 
 | File | Description |
 |------|-------------|
@@ -16,58 +27,59 @@ You will need three files from your environment:
 
 ## Building the image
 
-The image should be built and tagged ahead of time:
+Only the Bottle app image needs to be built:
 
 ```bash
-docker build -t bottle-nginx:1.0.0 .
+docker build -t bottle-app:1.0.0 bottle/
 ```
+
+Nginx uses the official `nginx` image directly — no build required.
 
 ## Running with docker compose
 
-1. Copy `.env.example` to `.env` and fill in the values (including `IMAGE_TAG`):
+1. Copy `.env.example` to `.env` and fill in the values:
 
    ```
    cp .env.example .env
    ```
 
-2. Start the container:
+2. Start the containers:
 
    ```
    docker compose up -d
    ```
 
-3. Logs will appear in the `./logs/` directory on the host.
+3. Logs appear in `./logs/bottle/` and `./logs/nginx/` on the host.
 
-## Running with docker run
+## Nginx configuration
 
-```bash
-docker run -d -p 443:443 \
-  -v /path/to/cert.pem:/etc/nginx/ssl/cert.pem:ro \
-  -v /path/to/key.pem:/etc/nginx/ssl/key.pem:ro \
-  -v /path/to/robot.keytab:/etc/krb5/robot.keytab:ro \
-  -v ./logs:/var/log/app \
-  -e KRB5_PRINCIPAL=my_robot_account \
-  -e KRB5_KEYTAB=/etc/krb5/robot.keytab \
-  bottle-nginx:1.0.0
-```
+The server block config is in `nginx-conf/bottle.conf` and is bind-mounted
+into the container at `/etc/nginx/conf.d/bottle.conf`. Edit it in place —
+no rebuild needed, just restart the nginx container.
 
 ## Logs
 
-All logs are written to `/var/log/app/` inside the container, which
-should be mounted to a host directory.
-
-| Log file | Source |
-|----------|--------|
-| `nginx-access.log` | Nginx access log |
-| `nginx-error.log` | Nginx error log |
-| `bottle.log` | Bottle application output |
-| `kinit.log` | Kerberos ticket renewal (cron) |
+| Directory | Log file | Source |
+|-----------|----------|--------|
+| `logs/bottle/` | `bottle.log` | Bottle application output |
+| `logs/bottle/` | `kinit.log` | Kerberos ticket renewal |
+| `logs/nginx/` | `access.log` | Nginx access log |
+| `logs/nginx/` | `error.log` | Nginx error log |
 
 ## Mount summary
 
+### Bottle container
+
 | Container path | Purpose | Mode |
 |----------------|---------|------|
+| `/etc/krb5/robot.keytab` | Kerberos keytab | read-only |
+| `/var/log/app` | Application logs | read-write |
+
+### Nginx container
+
+| Container path | Purpose | Mode |
+|----------------|---------|------|
+| `/etc/nginx/conf.d/bottle.conf` | Nginx server block | read-only |
 | `/etc/nginx/ssl/cert.pem` | TLS certificate | read-only |
 | `/etc/nginx/ssl/key.pem` | TLS private key | read-only |
-| `/etc/krb5/robot.keytab` | Kerberos keytab | read-only |
-| `/var/log/app` | All application logs | read-write |
+| `/var/log/nginx` | Nginx logs | read-write |
