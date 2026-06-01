@@ -1,14 +1,10 @@
 """
-S/MIME Email Encryption by shelling out to the openssl CLI (in-memory cert)
+S/MIME Email Encryption by shelling out to the openssl CLI
 
 Approach: no Python crypto library at all for the CMS step. We hand the
 plaintext to `openssl smime -encrypt` over stdin and read the SMIME-formatted
-output from stdout. The recipient cert is held only in an anonymous
-memfd_create() file descriptor and exposed to openssl as /dev/fd/N — it
-never touches the filesystem.
-
-Designed for workflows where the cert is fetched at runtime (e.g. from
-Active Directory) and writing it to disk would violate policy.
+output from stdout. The only Python crypto involvement is whatever cryptography
+or stdlib code you use elsewhere.
 
 Why this is sometimes the right answer:
     - The openssl binary is essentially guaranteed on RHEL/UBI hosts and CI.
@@ -19,16 +15,26 @@ Why this is sometimes the right answer:
 Tradeoffs:
     - Subprocess overhead per message (~tens of ms).
     - You inherit the system openssl's defaults and bugs.
-    - Linux only (memfd_create is a Linux syscall).
+
+Two encryption entry points:
+    encrypt_smime(plaintext, cert_path)
+        Cert read from a file on disk by openssl directly.
+
+    encrypt_smime_in_memory(plaintext, cert_pem)
+        Cert passed through bash process substitution as
+        `<(printf '%s' "$SMIME_CERT")` and never touches the filesystem.
+        Use when the cert comes from a runtime source like LDAP/AD.
+        PEM only (env vars can't carry binary safely). Requires bash.
 
 Requirements:
-    The `openssl` binary on PATH. Linux + Python 3.8+ (for os.memfd_create).
-    No Python deps beyond the stdlib.
+    The `openssl` binary on PATH. No Python deps beyond the stdlib.
+    The in-memory variant additionally requires `bash` on PATH.
 """
 
 # pattern: Imperative Shell
 
 import os
+import shlex
 import shutil
 import smtplib
 import subprocess
@@ -39,8 +45,8 @@ class OpenSSLNotFoundError(RuntimeError):
     """Raised when the openssl binary is not available on PATH."""
 
 
-class MemfdUnavailableError(RuntimeError):
-    """Raised when os.memfd_create is not available (non-Linux platforms)."""
+class BashUnavailableError(RuntimeError):
+    """Raised when bash is not available (required for in-memory variant)."""
 
 
 class SMIMEEncryptionError(RuntimeError):
@@ -54,48 +60,69 @@ def _require_openssl() -> str:
     return path
 
 
-def _require_memfd() -> None:
-    if not hasattr(os, 'memfd_create'):
-        raise MemfdUnavailableError(
-            "os.memfd_create unavailable on this platform; "
-            "in-memory cert encryption requires Linux + Python 3.8+"
+def _require_bash() -> str:
+    path = shutil.which('bash')
+    if path is None:
+        raise BashUnavailableError("bash binary not found on PATH")
+    return path
+
+
+def encrypt_smime(plaintext: bytes, recipient_cert_path: str, cipher: str = '-aes-256-cbc') -> bytes:
+    """Encrypt plaintext into an SMIME-formatted blob via the openssl CLI."""
+    openssl = _require_openssl()
+    proc = subprocess.run(
+        [openssl, 'smime', '-encrypt', cipher, '-outform', 'SMIME', recipient_cert_path],
+        input=plaintext,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise SMIMEEncryptionError(
+            f"openssl smime -encrypt failed (rc={proc.returncode}): "
+            f"{proc.stderr.decode('utf-8', errors='replace').strip()}"
         )
+    return proc.stdout
 
 
-def encrypt_smime(plaintext: bytes, cert_data: bytes, cipher: str = '-aes-256-cbc') -> bytes:
-    """Encrypt plaintext to SMIME via openssl, with cert held only in memory.
+def encrypt_smime_in_memory(plaintext: bytes, cert_pem, cipher: str = '-aes-256-cbc') -> bytes:
+    """Encrypt via openssl, exposing the cert through bash process substitution.
 
-    The cert bytes are written to an anonymous memfd_create() file descriptor
-    and exposed to openssl as /dev/fd/N. The cert never touches the filesystem;
-    the fd is closed in a finally block and the kernel reclaims the memory.
+    Runs the equivalent of:
+        openssl smime -encrypt <cipher> -outform SMIME <(printf '%s' "$SMIME_CERT")
+
+    The cert is passed to a bash subprocess in an env var, then written
+    through process substitution into a /dev/fd/N path that openssl reads.
+    The cert never touches the filesystem.
+
+    PEM only: env vars are NUL-terminated C strings, so DER (binary) certs
+    can't survive the trip. Convert DER to PEM upstream if needed.
     """
     openssl = _require_openssl()
-    _require_memfd()
-    if not cert_data:
-        raise SMIMEEncryptionError("cert_data is empty")
+    bash = _require_bash()
+    if isinstance(cert_pem, bytes):
+        cert_pem = cert_pem.decode('utf-8')
+    if not cert_pem:
+        raise SMIMEEncryptionError("cert is empty")
+    if '\x00' in cert_pem:
+        raise SMIMEEncryptionError("cert contains NUL byte; PEM expected, DER passed?")
 
-    cert_fd = os.memfd_create('smime-cert', os.MFD_CLOEXEC)
-    try:
-        os.write(cert_fd, cert_data)
-        os.lseek(cert_fd, 0, os.SEEK_SET)
-        # pass_fds inherits the fd into the child without FD_CLOEXEC,
-        # preserving its numeric value so /dev/fd/{cert_fd} resolves.
-        proc = subprocess.run(
-            [openssl, 'smime', '-encrypt', cipher,
-             '-outform', 'SMIME', f'/dev/fd/{cert_fd}'],
-            input=plaintext,
-            capture_output=True,
-            check=False,
-            pass_fds=(cert_fd,),
+    bash_script = (
+        f'exec {shlex.quote(openssl)} smime -encrypt {cipher} -outform SMIME '
+        f'<(printf "%s" "$SMIME_CERT")'
+    )
+    proc = subprocess.run(
+        [bash, '-c', bash_script],
+        input=plaintext,
+        capture_output=True,
+        check=False,
+        env={**os.environ, 'SMIME_CERT': cert_pem},
+    )
+    if proc.returncode != 0:
+        raise SMIMEEncryptionError(
+            f"openssl smime -encrypt failed (rc={proc.returncode}): "
+            f"{proc.stderr.decode('utf-8', errors='replace').strip()}"
         )
-        if proc.returncode != 0:
-            raise SMIMEEncryptionError(
-                f"openssl smime -encrypt failed (rc={proc.returncode}): "
-                f"{proc.stderr.decode('utf-8', errors='replace').strip()}"
-            )
-        return proc.stdout
-    finally:
-        os.close(cert_fd)
+    return proc.stdout
 
 
 class SMIMEMailer:
@@ -119,13 +146,33 @@ class SMIMEMailer:
         ).encode('utf-8')
         return headers + smime_blob
 
-    def create_encrypted_email(self, from_addr, to_addr, subject, body, cert_data: bytes) -> bytes:
+    def create_encrypted_email(self, from_addr, to_addr, subject, body, recipient_cert_path) -> bytes:
         inner = MIMEText(body, 'plain', 'utf-8').as_string()
-        smime_blob = encrypt_smime(inner.encode('utf-8'), cert_data)
+        smime_blob = encrypt_smime(inner.encode('utf-8'), recipient_cert_path)
         return self._wrap_smime_with_headers(smime_blob, from_addr, to_addr, subject)
 
-    def send_encrypted(self, from_addr, to_addr, subject, body, cert_data: bytes) -> None:
-        payload = self.create_encrypted_email(from_addr, to_addr, subject, body, cert_data)
+    def create_encrypted_email_from_cert_bytes(
+        self, from_addr, to_addr, subject, body, cert_pem,
+    ) -> bytes:
+        """Build an encrypted email when the cert is held in memory (e.g. from AD).
+
+        Cert never persisted to disk; passed via bash process substitution.
+        """
+        inner = MIMEText(body, 'plain', 'utf-8').as_string()
+        smime_blob = encrypt_smime_in_memory(inner.encode('utf-8'), cert_pem)
+        return self._wrap_smime_with_headers(smime_blob, from_addr, to_addr, subject)
+
+    def send_encrypted(self, from_addr, to_addr, subject, body, recipient_cert_path) -> None:
+        payload = self.create_encrypted_email(from_addr, to_addr, subject, body, recipient_cert_path)
+        self._send_smtp(from_addr, to_addr, payload)
+
+    def send_encrypted_with_cert_bytes(
+        self, from_addr, to_addr, subject, body, cert_pem,
+    ) -> None:
+        """Send an encrypted email using a cert held only in memory."""
+        payload = self.create_encrypted_email_from_cert_bytes(
+            from_addr, to_addr, subject, body, cert_pem,
+        )
         self._send_smtp(from_addr, to_addr, payload)
 
     def _send_smtp(self, from_addr: str, to_addr: str, payload: bytes) -> None:
@@ -139,9 +186,8 @@ class SMIMEMailer:
 
 if __name__ == "__main__":
     import argparse
-    from pathlib import Path
 
-    parser = argparse.ArgumentParser(description="S/MIME encrypted email via openssl CLI (in-memory cert)")
+    parser = argparse.ArgumentParser(description="S/MIME encrypted email via openssl CLI")
     parser.add_argument("--smtp-host", required=True)
     parser.add_argument("--smtp-port", type=int, default=587)
     parser.add_argument("--username")
@@ -150,16 +196,8 @@ if __name__ == "__main__":
     parser.add_argument("--to", dest="to_addr", required=True)
     parser.add_argument("--subject", required=True)
     parser.add_argument("--body", required=True)
-    parser.add_argument(
-        "--cert",
-        required=True,
-        help="Cert file path. Read into memory at startup; never reopened or passed to openssl by path.",
-    )
+    parser.add_argument("--cert", required=True)
     args = parser.parse_args()
-
-    # The CLI demo reads cert bytes here at the boundary. In a real
-    # deployment, replace this with your AD/LDAP fetch.
-    cert_bytes = Path(args.cert).read_bytes()
 
     SMIMEMailer(
         smtp_host=args.smtp_host,
@@ -171,6 +209,6 @@ if __name__ == "__main__":
         to_addr=args.to_addr,
         subject=args.subject,
         body=args.body,
-        cert_data=cert_bytes,
+        recipient_cert_path=args.cert,
     )
     print(f"Encrypted email sent to {args.to_addr}")
