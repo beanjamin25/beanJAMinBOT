@@ -101,6 +101,16 @@ def probe_encrypt5_inmemory(plaintext: bytes, cert_path: Path) -> tuple[bytes, s
     return encrypt_smime_in_memory(plaintext, cert_pem), "SMIME"
 
 
+def probe_encrypt5_x509(plaintext: bytes, cert_path: Path) -> tuple[bytes, str]:
+    # Simulates the typical AD path: load DER bytes into a cryptography
+    # x509.Certificate object, then hand the object straight to the
+    # encrypt wrapper which handles the DER→PEM conversion internally.
+    from cryptography import x509
+    from EmailEncrypt5 import encrypt_smime_from_x509
+    cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+    return encrypt_smime_from_x509(plaintext, cert), "SMIME"
+
+
 # =============================================================================
 # Runner
 # =============================================================================
@@ -112,6 +122,7 @@ PROBES = [
     ("EmailEncrypt4 (endesive)", probe_encrypt4, b"hello from endesive\n"),
     ("EmailEncrypt5 (openssl CLI, file)", probe_encrypt5, PLAINTEXT),
     ("EmailEncrypt5 (openssl CLI, bash printf)", probe_encrypt5_inmemory, PLAINTEXT),
+    ("EmailEncrypt5 (openssl CLI, from x509 obj)", probe_encrypt5_x509, PLAINTEXT),
 ]
 
 

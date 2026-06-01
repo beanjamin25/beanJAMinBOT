@@ -16,7 +16,7 @@ Tradeoffs:
     - Subprocess overhead per message (~tens of ms).
     - You inherit the system openssl's defaults and bugs.
 
-Two encryption entry points:
+Three encryption entry points:
     encrypt_smime(plaintext, cert_path)
         Cert read from a file on disk by openssl directly.
 
@@ -26,9 +26,16 @@ Two encryption entry points:
         Use when the cert comes from a runtime source like LDAP/AD.
         PEM only (env vars can't carry binary safely). Requires bash.
 
+    encrypt_smime_from_x509(plaintext, cert)
+        Convenience wrapper that takes a cryptography.x509.Certificate
+        object (e.g. from x509.load_der_x509_certificate) and serializes
+        it to PEM before calling encrypt_smime_in_memory.
+
 Requirements:
-    The `openssl` binary on PATH. No Python deps beyond the stdlib.
-    The in-memory variant additionally requires `bash` on PATH.
+    The `openssl` binary on PATH. No Python deps beyond the stdlib
+    for the file path. The in-memory path additionally requires `bash`
+    on PATH. The x509 wrapper additionally requires the `cryptography`
+    library (imported lazily — only paid for if you call it).
 """
 
 # pattern: Imperative Shell
@@ -125,6 +132,22 @@ def encrypt_smime_in_memory(plaintext: bytes, cert_pem, cipher: str = '-aes-256-
     return proc.stdout
 
 
+def encrypt_smime_from_x509(plaintext: bytes, cert, cipher: str = '-aes-256-cbc') -> bytes:
+    """Encrypt using a cryptography.x509.Certificate object held in memory.
+
+    Thin wrapper over encrypt_smime_in_memory that serializes the cert to
+    PEM via cert.public_bytes(Encoding.PEM). Useful when you've already
+    parsed a DER cert from AD/LDAP with x509.load_der_x509_certificate.
+
+    Requires the `cryptography` library (imported lazily at call time).
+    """
+    # Lazy import so this module stays stdlib-only unless the caller
+    # actually invokes the x509 path.
+    from cryptography.hazmat.primitives.serialization import Encoding
+
+    return encrypt_smime_in_memory(plaintext, cert.public_bytes(Encoding.PEM), cipher)
+
+
 class SMIMEMailer:
     """S/MIME encrypted email sender backed by the openssl CLI."""
 
@@ -174,6 +197,24 @@ class SMIMEMailer:
             from_addr, to_addr, subject, body, cert_pem,
         )
         self._send_smtp(from_addr, to_addr, payload)
+
+    def create_encrypted_email_from_x509(
+        self, from_addr, to_addr, subject, body, cert,
+    ) -> bytes:
+        """Build an encrypted email using a cryptography.x509.Certificate object."""
+        from cryptography.hazmat.primitives.serialization import Encoding
+        return self.create_encrypted_email_from_cert_bytes(
+            from_addr, to_addr, subject, body, cert.public_bytes(Encoding.PEM),
+        )
+
+    def send_encrypted_with_x509(
+        self, from_addr, to_addr, subject, body, cert,
+    ) -> None:
+        """Send an encrypted email using a cryptography.x509.Certificate object."""
+        from cryptography.hazmat.primitives.serialization import Encoding
+        self.send_encrypted_with_cert_bytes(
+            from_addr, to_addr, subject, body, cert.public_bytes(Encoding.PEM),
+        )
 
     def _send_smtp(self, from_addr: str, to_addr: str, payload: bytes) -> None:
         with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
