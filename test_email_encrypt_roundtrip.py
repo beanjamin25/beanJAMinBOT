@@ -88,8 +88,12 @@ def probe_encrypt4(plaintext: bytes, cert_path: Path) -> tuple[bytes, str]:
 
 
 def probe_encrypt5(plaintext: bytes, cert_path: Path) -> tuple[bytes, str]:
+    # Simulates the AD path: read cert bytes into memory at the boundary,
+    # then hand the bytes to the encrypt function which never re-reads
+    # the path (it uses memfd_create internally).
     from EmailEncrypt5 import encrypt_smime
-    return encrypt_smime(plaintext, str(cert_path)), "SMIME"
+    cert_bytes = cert_path.read_bytes()
+    return encrypt_smime(plaintext, cert_bytes), "SMIME"
 
 
 # =============================================================================
@@ -101,7 +105,7 @@ PROBES = [
     # endesive expects an email-shaped payload, not arbitrary bytes;
     # use a printable plaintext so decoded MIME comes back intact.
     ("EmailEncrypt4 (endesive)", probe_encrypt4, b"hello from endesive\n"),
-    ("EmailEncrypt5 (openssl CLI)", probe_encrypt5, PLAINTEXT),
+    ("EmailEncrypt5 (openssl CLI, in-memory cert)", probe_encrypt5, PLAINTEXT),
 ]
 
 

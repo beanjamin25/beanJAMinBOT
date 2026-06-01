@@ -1,10 +1,14 @@
 """
-S/MIME Email Encryption by shelling out to the openssl CLI
+S/MIME Email Encryption by shelling out to the openssl CLI (in-memory cert)
 
 Approach: no Python crypto library at all for the CMS step. We hand the
 plaintext to `openssl smime -encrypt` over stdin and read the SMIME-formatted
-output from stdout. The only Python crypto involvement is whatever cryptography
-or stdlib code you use elsewhere.
+output from stdout. The recipient cert is held only in an anonymous
+memfd_create() file descriptor and exposed to openssl as /dev/fd/N — it
+never touches the filesystem.
+
+Designed for workflows where the cert is fetched at runtime (e.g. from
+Active Directory) and writing it to disk would violate policy.
 
 Why this is sometimes the right answer:
     - The openssl binary is essentially guaranteed on RHEL/UBI hosts and CI.
@@ -14,13 +18,17 @@ Why this is sometimes the right answer:
 
 Tradeoffs:
     - Subprocess overhead per message (~tens of ms).
-    - Cert path must be accessible to the openssl process.
     - You inherit the system openssl's defaults and bugs.
+    - Linux only (memfd_create is a Linux syscall).
 
 Requirements:
-    The `openssl` binary on PATH. No Python deps beyond the stdlib.
+    The `openssl` binary on PATH. Linux + Python 3.8+ (for os.memfd_create).
+    No Python deps beyond the stdlib.
 """
 
+# pattern: Imperative Shell
+
+import os
 import shutil
 import smtplib
 import subprocess
@@ -29,6 +37,10 @@ from email.mime.text import MIMEText
 
 class OpenSSLNotFoundError(RuntimeError):
     """Raised when the openssl binary is not available on PATH."""
+
+
+class MemfdUnavailableError(RuntimeError):
+    """Raised when os.memfd_create is not available (non-Linux platforms)."""
 
 
 class SMIMEEncryptionError(RuntimeError):
@@ -42,21 +54,48 @@ def _require_openssl() -> str:
     return path
 
 
-def encrypt_smime(plaintext: bytes, recipient_cert_path: str, cipher: str = '-aes-256-cbc') -> bytes:
-    """Encrypt plaintext into an SMIME-formatted blob via the openssl CLI."""
-    openssl = _require_openssl()
-    proc = subprocess.run(
-        [openssl, 'smime', '-encrypt', cipher, '-outform', 'SMIME', recipient_cert_path],
-        input=plaintext,
-        capture_output=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise SMIMEEncryptionError(
-            f"openssl smime -encrypt failed (rc={proc.returncode}): "
-            f"{proc.stderr.decode('utf-8', errors='replace').strip()}"
+def _require_memfd() -> None:
+    if not hasattr(os, 'memfd_create'):
+        raise MemfdUnavailableError(
+            "os.memfd_create unavailable on this platform; "
+            "in-memory cert encryption requires Linux + Python 3.8+"
         )
-    return proc.stdout
+
+
+def encrypt_smime(plaintext: bytes, cert_data: bytes, cipher: str = '-aes-256-cbc') -> bytes:
+    """Encrypt plaintext to SMIME via openssl, with cert held only in memory.
+
+    The cert bytes are written to an anonymous memfd_create() file descriptor
+    and exposed to openssl as /dev/fd/N. The cert never touches the filesystem;
+    the fd is closed in a finally block and the kernel reclaims the memory.
+    """
+    openssl = _require_openssl()
+    _require_memfd()
+    if not cert_data:
+        raise SMIMEEncryptionError("cert_data is empty")
+
+    cert_fd = os.memfd_create('smime-cert', os.MFD_CLOEXEC)
+    try:
+        os.write(cert_fd, cert_data)
+        os.lseek(cert_fd, 0, os.SEEK_SET)
+        # pass_fds inherits the fd into the child without FD_CLOEXEC,
+        # preserving its numeric value so /dev/fd/{cert_fd} resolves.
+        proc = subprocess.run(
+            [openssl, 'smime', '-encrypt', cipher,
+             '-outform', 'SMIME', f'/dev/fd/{cert_fd}'],
+            input=plaintext,
+            capture_output=True,
+            check=False,
+            pass_fds=(cert_fd,),
+        )
+        if proc.returncode != 0:
+            raise SMIMEEncryptionError(
+                f"openssl smime -encrypt failed (rc={proc.returncode}): "
+                f"{proc.stderr.decode('utf-8', errors='replace').strip()}"
+            )
+        return proc.stdout
+    finally:
+        os.close(cert_fd)
 
 
 class SMIMEMailer:
@@ -69,11 +108,8 @@ class SMIMEMailer:
         self.password = password
         self.use_tls = use_tls
 
-    def create_encrypted_email(self, from_addr, to_addr, subject, body, recipient_cert_path) -> bytes:
-        # Build the inner MIME message exactly as the other implementations do
-        inner = MIMEText(body, 'plain', 'utf-8').as_string()
-        smime_blob = encrypt_smime(inner.encode('utf-8'), recipient_cert_path)
-
+    @staticmethod
+    def _wrap_smime_with_headers(smime_blob: bytes, from_addr: str, to_addr: str, subject: str) -> bytes:
         # openssl emits a full SMIME message body but without the routing
         # headers. Prepend them so SMTP and recipient clients route correctly.
         headers = (
@@ -83,8 +119,16 @@ class SMIMEMailer:
         ).encode('utf-8')
         return headers + smime_blob
 
-    def send_encrypted(self, from_addr, to_addr, subject, body, recipient_cert_path) -> None:
-        payload = self.create_encrypted_email(from_addr, to_addr, subject, body, recipient_cert_path)
+    def create_encrypted_email(self, from_addr, to_addr, subject, body, cert_data: bytes) -> bytes:
+        inner = MIMEText(body, 'plain', 'utf-8').as_string()
+        smime_blob = encrypt_smime(inner.encode('utf-8'), cert_data)
+        return self._wrap_smime_with_headers(smime_blob, from_addr, to_addr, subject)
+
+    def send_encrypted(self, from_addr, to_addr, subject, body, cert_data: bytes) -> None:
+        payload = self.create_encrypted_email(from_addr, to_addr, subject, body, cert_data)
+        self._send_smtp(from_addr, to_addr, payload)
+
+    def _send_smtp(self, from_addr: str, to_addr: str, payload: bytes) -> None:
         with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
             if self.use_tls:
                 server.starttls()
@@ -95,8 +139,9 @@ class SMIMEMailer:
 
 if __name__ == "__main__":
     import argparse
+    from pathlib import Path
 
-    parser = argparse.ArgumentParser(description="S/MIME encrypted email via openssl CLI")
+    parser = argparse.ArgumentParser(description="S/MIME encrypted email via openssl CLI (in-memory cert)")
     parser.add_argument("--smtp-host", required=True)
     parser.add_argument("--smtp-port", type=int, default=587)
     parser.add_argument("--username")
@@ -105,8 +150,16 @@ if __name__ == "__main__":
     parser.add_argument("--to", dest="to_addr", required=True)
     parser.add_argument("--subject", required=True)
     parser.add_argument("--body", required=True)
-    parser.add_argument("--cert", required=True)
+    parser.add_argument(
+        "--cert",
+        required=True,
+        help="Cert file path. Read into memory at startup; never reopened or passed to openssl by path.",
+    )
     args = parser.parse_args()
+
+    # The CLI demo reads cert bytes here at the boundary. In a real
+    # deployment, replace this with your AD/LDAP fetch.
+    cert_bytes = Path(args.cert).read_bytes()
 
     SMIMEMailer(
         smtp_host=args.smtp_host,
@@ -118,6 +171,6 @@ if __name__ == "__main__":
         to_addr=args.to_addr,
         subject=args.subject,
         body=args.body,
-        recipient_cert_path=args.cert,
+        cert_data=cert_bytes,
     )
     print(f"Encrypted email sent to {args.to_addr}")
